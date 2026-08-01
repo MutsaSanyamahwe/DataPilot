@@ -1,1 +1,88 @@
 @import "tailwindcss";
+
+:root {
+  --bg: #F6F8FB;
+  --surface: #FFFFFF;
+  --ink: #16202B;
+  --ink-muted: #5B6675;
+  --amber: #C6852E;
+  --teal: #2F9C93;
+  --border: #E0E4EA;
+}
+
+[data-theme="dark"] {
+  --bg: #0E1420;
+  --surface: #161E2E;
+  --ink: #F2F0EA;
+  --ink-muted: #98A2B3;
+  --amber: #D9A441;
+  --teal: #4FD1C5;
+  --border: #262F42;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'Inter', sans-serif;
+  transition: background 0.3s ease, color 0.3s ease;
+  margin: 0;
+}
+
+.font-display { font-family: 'Space Grotesk', sans-serif; }
+.font-mono { font-family: 'IBM Plex Mono', monospace; }
+
+.glow-orb {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 600px;
+  height: 600px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle, var(--amber) 0%, transparent 65%);
+  opacity: 0.12;
+  filter: blur(40px);
+  pointer-events: none;
+  animation: pulse 6s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.10; transform: translate(-50%, -50%) scale(1); }
+  50%      { opacity: 0.18; transform: translate(-50%, -50%) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow-orb { animation: none; }
+}
+
+.plane-icon {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 20px;
+  height: 20px;
+  animation: fly 5s ease-in-out infinite;
+}
+
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+  color: var(--ink-muted);
+}
+
+@keyframes fly {
+  0%   { left: 0%; opacity: 0; }
+  8%   { opacity: 1; }
+  92%  { opacity: 1; }
+  100% { left: calc(100% - 22px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .plane-icon { animation: none; left: 45%; opacity: 1; }
+}
