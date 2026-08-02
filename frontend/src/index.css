@@ -1,88 +1,185 @@
 @import "tailwindcss";
 
+
+
 :root {
   --bg: #F6F8FB;
   --surface: #FFFFFF;
-  --ink: #16202B;
-  --ink-muted: #5B6675;
-  --amber: #C6852E;
-  --teal: #2F9C93;
+  --text: #16202B;
+  --muted: #5B6675;
   --border: #E0E4EA;
+
+  --amber: #C6852E;
+  --amber-soft: rgba(198, 133, 46, 0.12);
+  --amber-light: #E0A85C;
+  --amber-dark: #9C6821;
+
+  --teal: #2F9C93;
+  --teal-soft: rgba(47, 156, 147, 0.12);
+  --teal-dark: #22706A;
+  --teal-muted: rgba(47, 156, 147, 0.5);
 }
 
 [data-theme="dark"] {
   --bg: #0E1420;
   --surface: #161E2E;
-  --ink: #F2F0EA;
-  --ink-muted: #98A2B3;
-  --amber: #D9A441;
-  --teal: #4FD1C5;
+  --text: #F2F0EA;
+  --muted: #98A2B3;
   --border: #262F42;
+
+  --amber: #D9A441;
+  --amber-soft: rgba(217, 164, 65, 0.15);
+  --amber-light: #E8BE6E;
+  --amber-dark: #B5822E;
+
+  --teal: #4FD1C5;
+  --teal-soft: rgba(79, 209, 197, 0.15);
+  --teal-dark: #35A99E;
+  --teal-muted: rgba(79, 209, 197, 0.5);
+}
+
+* {
+  border-color: var(--border);
 }
 
 body {
   background: var(--bg);
-  color: var(--ink);
+  color: var(--text);
   font-family: 'Inter', sans-serif;
   transition: background 0.3s ease, color 0.3s ease;
   margin: 0;
 }
 
 .font-display { font-family: 'Space Grotesk', sans-serif; }
+.font-body { font-family: 'Inter', sans-serif; }
 .font-mono { font-family: 'IBM Plex Mono', monospace; }
 
-.glow-orb {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 600px;
-  height: 600px;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle, var(--amber) 0%, transparent 65%);
-  opacity: 0.12;
-  filter: blur(40px);
-  pointer-events: none;
-  animation: pulse 6s ease-in-out infinite;
+/* Card / panel surface */
+.surface {
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 0.10; transform: translate(-50%, -50%) scale(1); }
-  50%      { opacity: 0.18; transform: translate(-50%, -50%) scale(1.08); }
+.border-themed {
+  border: 1px solid var(--border);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .glow-orb { animation: none; }
+/* Eyebrow badge */
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
 }
 
-.plane-icon {
-  position: absolute;
-  top: 8px;
-  left: 0;
-  width: 20px;
-  height: 20px;
-  animation: fly 5s ease-in-out infinite;
-}
-
-
-.badge {
+/* Pill badge */
+.pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  font-size: 12px;
+  background: var(--surface);
   font-family: 'IBM Plex Mono', monospace;
-  color: var(--ink-muted);
+  font-size: 12px;
+  color: var(--muted);
 }
 
-@keyframes fly {
+/* Primary CTA button */
+.btn-amber {
+  background: var(--amber);
+  color: var(--bg);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+.btn-amber:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+.btn-amber:active {
+  transform: translateY(0);
+}
+
+/* Thin scrollbars */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+/* Background glow */
+.glow-radial {
+  background: radial-gradient(circle, var(--amber) 0%, transparent 70%);
+  opacity: 0.15;
+  filter: blur(60px);
+}
+
+/* Animations */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out both;
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up {
+  animation: slide-up 0.4s ease-out both;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 0.12; transform: scale(1); }
+  50%      { opacity: 0.20; transform: scale(1.08); }
+}
+.animate-pulse-glow {
+  animation: pulse-glow 6s ease-in-out infinite;
+}
+
+@keyframes bar-grow {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+.animate-bar-grow {
+  animation: bar-grow 0.5s ease-out both;
+}
+
+@keyframes spin-slow {
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 1s linear infinite;
+}
+
+/* Flight path plane animation */
+@keyframes fly-x {
   0%   { left: 0%; opacity: 0; }
   8%   { opacity: 1; }
   92%  { opacity: 1; }
-  100% { left: calc(100% - 22px); opacity: 0; }
+  100% { left: calc(100% - 24px); opacity: 0; }
 }
 
+
+
 @media (prefers-reduced-motion: reduce) {
-  .plane-icon { animation: none; left: 45%; opacity: 1; }
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-pulse-glow,
+  .animate-bar-grow,
+  .animate-spin-slow {
+    animation: none !important;
+  }
 }
+

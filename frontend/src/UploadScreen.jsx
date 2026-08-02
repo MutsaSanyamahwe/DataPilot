@@ -2,27 +2,39 @@ import { useState, useRef, useCallback } from 'react';
 import { UploadCloud, FileSpreadsheet, X, ArrowRight, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-import { parseFile } from './lib/fileParser';
+
+const API_BASE = 'http://localhost:8000';
 
 export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     const [isDragging, setIsDragging] = useState(false);
-    const [parsing, setParsing] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [error, setError] = useState(null);
     const [selectedFiles, setSelectedFiles] = useState([]);
     const inputRef = useRef(null);
 
-    const handleFiles = useCallback(async (fileList) => {
+    const handleFiles = useCallback((fileList) => {
         if (!fileList || fileList.length === 0) return;
         const valid = Array.from(fileList).filter((f) => {
             const ext = f.name.split('.').pop()?.toLowerCase();
-            return ext === 'csv' || ext === 'xlsx' || ext === 'xls' || ext === 'tsv';
+            return ext === 'csv' || ext === 'xlsx' || ext === 'xls';
         });
         if (valid.length === 0) {
             setError('Please upload CSV or Excel files (.csv, .xlsx, .xls).');
             return;
         }
         setError(null);
-        setSelectedFiles(valid);
+        setSelectedFiles((prev) => {
+            const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`));
+            const merged = [...prev];
+            for (const file of valid) {
+                const key = `${file.name}-${file.size}`;
+                if (!existingKeys.has(key)) {
+                    merged.push(file);
+                    existingKeys.add(key);
+                }
+            }
+            return merged;
+        });
     }, []);
 
     const handleDragOver = (e) => {
@@ -43,19 +55,27 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
 
     const handleProceed = async () => {
         if (selectedFiles.length === 0) return;
-        setParsing(true);
+        setUploading(true);
         setError(null);
+
+        const formData = new FormData();
+        selectedFiles.forEach((file) => formData.append('files', file));
+
         try {
-            const parsed = [];
-            for (const file of selectedFiles) {
-                const result = await parseFile(file);
-                parsed.push(result);
+            const res = await fetch(`${API_BASE}/upload/inspect`, {
+                method: 'POST',
+                body: formData,
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => null);
+                throw new Error(body?.detail || `Server error: ${res.status}`);
             }
-            onFilesParsed(parsed);
-        } catch {
-            setError('Could not read those files. Make sure they are valid CSV or Excel files.');
+            const data = await res.json();
+            onFilesParsed(data); // { session_id, files }
+        } catch (err) {
+            setError(err.message || 'Could not upload those files. Is the backend running?');
         } finally {
-            setParsing(false);
+            setUploading(false);
         }
     };
 
@@ -84,11 +104,10 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                             Drop your data here
                         </h1>
                         <p className="mt-2 font-body text-sm" style={{ color: 'var(--muted)' }}>
-                            CSV, XLSX, or XLS files. You can add multiple files at once.
+                            CSV or Excel files. You can add multiple files at once.
                         </p>
                     </div>
 
-                    {/* Dropzone */}
                     <div
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
@@ -106,7 +125,7 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                             ref={inputRef}
                             type="file"
                             multiple
-                            accept=".csv,.xlsx,.xls,.tsv"
+                            accept=".csv,.xlsx,.xls"
                             className="hidden"
                             onChange={(e) => handleFiles(e.target.files)}
                         />
@@ -130,21 +149,16 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                         </div>
                     </div>
 
-                    {/* Error */}
                     {error && (
                         <p className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--amber)' }}>
                             {error}
                         </p>
                     )}
 
-                    {/* Selected files */}
                     {selectedFiles.length > 0 && (
                         <div className="mt-5 space-y-2 animate-slide-up">
                             {selectedFiles.map((file, idx) => (
-                                <div
-                                    key={idx}
-                                    className="flex items-center justify-between rounded-lg surface px-4 py-3 animate-fade-in"
-                                >
+                                <div key={idx} className="flex items-center justify-between rounded-lg surface px-4 py-3 animate-fade-in">
                                     <div className="flex items-center gap-3">
                                         <FileSpreadsheet size={18} style={{ color: 'var(--teal)' }} />
                                         <div>
@@ -166,18 +180,17 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                         </div>
                     )}
 
-                    {/* Proceed button */}
                     {selectedFiles.length > 0 && (
                         <div className="mt-6 flex justify-center animate-fade-in">
                             <button
                                 onClick={handleProceed}
-                                disabled={parsing}
+                                disabled={uploading}
                                 className="btn-amber inline-flex items-center gap-2 rounded-xl px-6 py-3 font-display text-sm font-semibold disabled:opacity-60"
                             >
-                                {parsing ? (
+                                {uploading ? (
                                     <>
                                         <Loader2 size={16} className="animate-spin-slow" />
-                                        Parsing files...
+                                        Uploading...
                                     </>
                                 ) : (
                                     <>

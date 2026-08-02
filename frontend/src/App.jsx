@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import LandingPage from './LandingPage'
+import { Landing as LandingPage } from './LandingPage'
 import { UploadScreen } from './UploadScreen'
 import { InspectScreen } from './InspectScreen'
 import { ConfirmScreen } from './ConfirmScreen'
@@ -9,12 +9,11 @@ function App() {
   const [theme, setTheme] = useState(
     () => localStorage.getItem('datapilot-theme') || 'dark'
   )
-  // 'landing' | 'upload' | 'inspect' | 'confirm' | 'chat'
   const [view, setView] = useState('landing')
 
-  const [rawFiles, setRawFiles] = useState([])       // File objects from UploadScreen
-  const [parsedFiles, setParsedFiles] = useState([])  // parsed file+sheet data → InspectScreen
-  const [loadedTables, setLoadedTables] = useState([]) // confirmed tables → ConfirmScreen / ChatScreen
+  const [sessionId, setSessionId] = useState(null)
+  const [inspectFiles, setInspectFiles] = useState([])
+  const [loadedTables, setLoadedTables] = useState([])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -22,17 +21,17 @@ function App() {
   }, [theme])
 
   const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))
-
   const goTo = (nextView) => () => setView(nextView)
 
+  const resetSession = () => {
+    setSessionId(null)
+    setInspectFiles([])
+    setLoadedTables([])
+    setView('landing')
+  }
+
   if (view === 'landing') {
-    return (
-      <LandingPage
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onGetStarted={goTo('upload')}
-      />
-    )
+    return <LandingPage theme={theme} onToggleTheme={toggleTheme} onGetStarted={goTo('upload')} />
   }
 
   if (view === 'upload') {
@@ -41,8 +40,9 @@ function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onBack={goTo('landing')}
-        onFilesParsed={(parsed) => {
-          setParsedFiles(parsed)
+        onFilesParsed={(data) => {
+          setSessionId(data.session_id)
+          setInspectFiles(data.files)
           setView('inspect')
         }}
       />
@@ -55,9 +55,10 @@ function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onBack={goTo('upload')}
-        files={parsedFiles}
-        onConfirm={(selectedSheets) => {
-          setLoadedTables(selectedSheets)
+        sessionId={sessionId}
+        files={inspectFiles}
+        onConfirm={(data) => {
+          setLoadedTables(data.tables)
           setView('confirm')
         }}
       />
@@ -70,6 +71,7 @@ function App() {
         theme={theme}
         onToggleTheme={toggleTheme}
         onBack={goTo('inspect')}
+        sessionId={sessionId}
         tables={loadedTables}
         onProceed={goTo('chat')}
       />
@@ -81,12 +83,8 @@ function App() {
       <ChatScreen
         theme={theme}
         onToggleTheme={toggleTheme}
-        onBack={() => {
-          setRawFiles([])
-          setParsedFiles([])
-          setLoadedTables([])
-          setView('landing')
-        }}
+        onBack={resetSession}
+        sessionId={sessionId}
         tables={loadedTables}
       />
     )

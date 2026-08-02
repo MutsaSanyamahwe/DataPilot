@@ -23,21 +23,20 @@ export function Landing({ theme, onToggleTheme, onGetStarted }) {
           {/* Eyebrow badge */}
           <div className="mb-5 flex justify-center animate-fade-in">
             <span className="eyebrow">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: 'var(--amber)' }} />
-              Autonomous data analysis
+              Your AI data analyst
             </span>
           </div>
 
           {/* Headline */}
           <h1 className="font-display text-4xl font-bold leading-[1.1] tracking-tight md:text-6xl animate-fade-in" style={{ animationDelay: '0.1s' }}>
-            Plain English in.
+            Upload a spreadsheet.
             <br />
-            Clear answers out.
+            Ask it anything.
           </h1>
 
           {/* Subheading */}
           <p className="mx-auto mt-5 max-w-xl font-body text-base leading-relaxed md:text-lg animate-fade-in" style={{ color: 'var(--muted)', animationDelay: '0.2s' }}>
-            Upload your CSVs or spreadsheets, ask questions like you would a colleague, and get back SQL-backed analysis, charts, and a report you can download.
+            Drop in a CSV or Excel file, type a question the way you'd ask a colleague, and DataPilot writes the SQL, runs the analysis, and hands you back an answer — charts and a downloadable report included.
           </p>
 
           {/* CTA */}

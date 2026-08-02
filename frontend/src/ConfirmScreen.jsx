@@ -1,28 +1,9 @@
-import { useState } from 'react';
-import { ArrowRight, ArrowLeft, Table2, Hash, Check, Loader2 } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Table2, Hash } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-import { loadTables } from './lib/sqlEngine';
 
-export function ConfirmScreen({ theme, onToggleTheme, onBack, tables, onProceed }) {
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-
-    const handleProceed = async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            await loadTables(tables);
-            onProceed();
-        } catch {
-            setError('Could not load data into the analysis engine. Please try again.');
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const totalRows = tables.reduce((sum, t) => sum + t.rowCount, 0);
-    const totalCols = tables.reduce((sum, t) => sum + t.columns.length, 0);
+export function ConfirmScreen({ theme, onToggleTheme, onBack, sessionId, tables, onProceed }) {
+    const totalRows = tables.reduce((sum, t) => sum + t.rows, 0);
 
     return (
         <div className="flex min-h-screen flex-col">
@@ -45,51 +26,33 @@ export function ConfirmScreen({ theme, onToggleTheme, onBack, tables, onProceed 
                             Data loaded successfully
                         </h1>
                         <p className="mt-2 font-body text-sm" style={{ color: 'var(--muted)' }}>
-                            {tables.length} {tables.length === 1 ? 'table' : 'tables'} · {totalRows.toLocaleString()} rows · {totalCols} columns ready for analysis.
+                            {tables.length} {tables.length === 1 ? 'table' : 'tables'} · {totalRows.toLocaleString()} rows ready for analysis.
                         </p>
                     </div>
 
-                    {/* Summary stats */}
-                    <div className="mb-5 grid grid-cols-3 gap-3 animate-fade-in">
+                    <div className="mb-5 grid grid-cols-2 gap-3 animate-fade-in">
                         <StatCard label="Tables" value={tables.length.toString()} icon={<Table2 size={16} />} />
                         <StatCard label="Total rows" value={totalRows.toLocaleString()} icon={<Hash size={16} />} />
-                        <StatCard label="Columns" value={totalCols.toString()} icon={<Check size={16} />} />
                     </div>
 
-                    {/* Table cards */}
                     <div className="space-y-4">
                         {tables.map((table, idx) => (
-                            <div key={table.name} className="rounded-2xl surface p-5 animate-fade-in" style={{ animationDelay: `${idx * 0.08}s` }}>
+                            <div key={table.table_name} className="rounded-2xl surface p-5 animate-fade-in" style={{ animationDelay: `${idx * 0.08}s` }}>
                                 <div className="mb-3 flex items-center gap-2">
                                     <Table2 size={18} style={{ color: 'var(--teal)' }} />
-                                    <span className="font-display text-base font-semibold">{table.name}</span>
+                                    <span className="font-display text-base font-semibold font-mono">{table.table_name}</span>
                                     <span className="ml-auto font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                                        {table.rowCount.toLocaleString()} rows
+                                        {table.rows.toLocaleString()} rows
                                     </span>
                                 </div>
-                                <p className="mb-3 font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                                    Source: {table.source}
-                                </p>
                                 <div className="flex flex-wrap gap-1.5">
                                     {table.columns.map((col) => (
                                         <span
-                                            key={col.name}
-                                            className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 font-mono text-xs"
-                                            style={{
-                                                backgroundColor: 'var(--bg)',
-                                                border: '1px solid var(--border)',
-                                            }}
+                                            key={col}
+                                            className="inline-flex items-center rounded-md px-2 py-1 font-mono text-xs"
+                                            style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
                                         >
-                                            {col.name}
-                                            <span
-                                                className="rounded px-1 text-[10px] uppercase"
-                                                style={{
-                                                    backgroundColor: col.type === 'number' ? 'var(--amber-soft)' : col.type === 'date' ? 'var(--teal-soft)' : 'var(--border)',
-                                                    color: col.type === 'number' ? 'var(--amber)' : col.type === 'date' ? 'var(--teal)' : 'var(--muted)',
-                                                }}
-                                            >
-                                                {col.type}
-                                            </span>
+                                            {col}
                                         </span>
                                     ))}
                                 </div>
@@ -97,13 +60,6 @@ export function ConfirmScreen({ theme, onToggleTheme, onBack, tables, onProceed 
                         ))}
                     </div>
 
-                    {error && (
-                        <p className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--amber)' }}>
-                            {error}
-                        </p>
-                    )}
-
-                    {/* Actions */}
                     <div className="mt-6 flex items-center justify-between animate-fade-in">
                         <button
                             onClick={onBack}
@@ -114,21 +70,11 @@ export function ConfirmScreen({ theme, onToggleTheme, onBack, tables, onProceed 
                             Back
                         </button>
                         <button
-                            onClick={handleProceed}
-                            disabled={loading}
-                            className="btn-amber inline-flex items-center gap-2 rounded-xl px-6 py-3 font-display text-sm font-semibold disabled:opacity-60"
+                            onClick={onProceed}
+                            className="btn-amber inline-flex items-center gap-2 rounded-xl px-6 py-3 font-display text-sm font-semibold"
                         >
-                            {loading ? (
-                                <>
-                                    <Loader2 size={16} className="animate-spin-slow" />
-                                    Loading into engine...
-                                </>
-                            ) : (
-                                <>
-                                    Start analyzing
-                                    <ArrowRight size={16} strokeWidth={2.5} />
-                                </>
-                            )}
+                            Start analyzing
+                            <ArrowRight size={16} strokeWidth={2.5} />
                         </button>
                     </div>
                 </div>

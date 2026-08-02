@@ -1,46 +1,65 @@
 import { useState } from 'react';
-import { FileSpreadsheet, Check, ArrowRight, ArrowLeft, Layers } from 'lucide-react';
+import { FileSpreadsheet, Check, ArrowRight, ArrowLeft, Layers, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 
-export function InspectScreen({ theme, onToggleTheme, onBack, files, onConfirm }) {
-    // Default: select first sheet of each file (for single-sheet files, auto-select)
+const API_BASE = 'http://localhost:8000';
+
+export function InspectScreen({ theme, onToggleTheme, onBack, sessionId, files = [], onConfirm }) {
     const [selection, setSelection] = useState(() => {
-        const set = new Set();
+        const map = {};
         for (const file of files) {
-            if (file.sheets.length === 1) {
-                set.add(sheetKey(file.fileName, file.sheets[0].sheetName));
-            } else {
-                // pre-select first sheet of multi-sheet files
-                set.add(sheetKey(file.fileName, file.sheets[0].sheetName));
+            if (file.type === 'excel') {
+                map[file.filename] = [...file.sheets];
             }
         }
-        return set;
+        return map;
     });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
 
-    const toggle = (fileName, sheetName) => {
-        const key = sheetKey(fileName, sheetName);
+    const toggleSheet = (filename, sheet) => {
         setSelection((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
+            const current = prev[filename] || [];
+            const updated = current.includes(sheet)
+                ? current.filter((s) => s !== sheet)
+                : [...current, sheet];
+            return { ...prev, [filename]: updated };
         });
     };
 
-    const handleConfirm = () => {
-        const selected = [];
-        for (const file of files) {
-            for (const sheet of file.sheets) {
-                if (selection.has(sheetKey(file.fileName, sheet.sheetName))) {
-                    selected.push(sheet);
-                }
-            }
-        }
-        if (selected.length > 0) onConfirm(selected);
-    };
+    const selectedCount = files.reduce((sum, f) => {
+        if (f.type === 'csv') return sum + 1;
+        return sum + (selection[f.filename]?.length || 0);
+    }, 0);
 
-    const selectedCount = selection.size;
+    const handleConfirm = async () => {
+        setLoading(true);
+        setError(null);
+
+        const selections = files.map((f) => ({
+            filename: f.filename,
+            sheets: f.type === 'excel' ? (selection[f.filename] || []) : null,
+        }));
+
+        try {
+            const res = await fetch(`${API_BASE}/upload/confirm`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, selections }),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => null);
+                throw new Error(body?.detail || `Server error: ${res.status}`);
+            }
+            const data = await res.json();
+            onConfirm(data);
+        } catch (err) {
+            setError(err.message || 'Could not load the selected data.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
     return (
         <div className="flex min-h-screen flex-col">
@@ -63,21 +82,19 @@ export function InspectScreen({ theme, onToggleTheme, onBack, files, onConfirm }
                             Choose what to load
                         </h1>
                         <p className="mt-2 font-body text-sm" style={{ color: 'var(--muted)' }}>
-                            {files.length === 1
-                                ? files[0].sheets.length > 1
-                                    ? 'This workbook has multiple sheets. Pick the ones you want to analyze.'
-                                    : 'Review your file before loading.'
-                                : 'Multiple files detected. Pick the sheets you want to analyze.'}
+                            {files.some((f) => f.type === 'excel')
+                                ? 'Pick the sheets you want to analyze from each workbook.'
+                                : 'Review your files before loading.'}
                         </p>
                     </div>
 
                     <div className="space-y-4">
                         {files.map((file) => (
-                            <div key={file.fileName} className="rounded-2xl surface p-4 animate-fade-in">
+                            <div key={file.filename} className="rounded-2xl surface p-4 animate-fade-in">
                                 <div className="mb-3 flex items-center gap-2">
                                     <FileSpreadsheet size={18} style={{ color: 'var(--teal)' }} />
-                                    <span className="font-display text-sm font-semibold">{file.fileName}</span>
-                                    {file.sheets.length > 1 && (
+                                    <span className="font-display text-sm font-semibold">{file.filename}</span>
+                                    {file.type === 'excel' && (
                                         <span className="ml-auto pill text-[10px]">
                                             <Layers size={11} />
                                             {file.sheets.length} sheets
@@ -85,53 +102,50 @@ export function InspectScreen({ theme, onToggleTheme, onBack, files, onConfirm }
                                     )}
                                 </div>
 
-                                <div className="space-y-2">
-                                    {file.sheets.map((sheet) => {
-                                        const key = sheetKey(file.fileName, sheet.sheetName);
-                                        const isSelected = selection.has(key);
-                                        const isEmpty = sheet.rows.length === 0;
-                                        return (
-                                            <button
-                                                key={sheet.sheetName}
-                                                onClick={() => toggle(file.fileName, sheet.sheetName)}
-                                                disabled={isEmpty}
-                                                className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all"
-                                                style={{
-                                                    border: `1px solid ${isSelected ? 'var(--amber)' : 'var(--border)'}`,
-                                                    background: isSelected ? 'var(--amber-soft)' : 'transparent',
-                                                    opacity: isEmpty ? 0.4 : 1,
-                                                    cursor: isEmpty ? 'not-allowed' : 'pointer',
-                                                }}
-                                            >
-                                                <div
-                                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors"
+                                {file.type === 'csv' ? (
+                                    <p className="text-sm" style={{ color: 'var(--muted)' }}>
+                                        Single table — loaded automatically.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {file.sheets.map((sheet) => {
+                                            const isSelected = selection[file.filename]?.includes(sheet);
+                                            return (
+                                                <button
+                                                    key={sheet}
+                                                    onClick={() => toggleSheet(file.filename, sheet)}
+                                                    className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-all"
                                                     style={{
-                                                        borderColor: isSelected ? 'var(--amber)' : 'var(--border)',
-                                                        backgroundColor: isSelected ? 'var(--amber)' : 'transparent',
-                                                        color: 'var(--bg)',
+                                                        border: `1px solid ${isSelected ? 'var(--amber)' : 'var(--border)'}`,
+                                                        background: isSelected ? 'var(--amber-soft)' : 'transparent',
                                                     }}
                                                 >
-                                                    {isSelected && <Check size={13} strokeWidth={3} />}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <span className="font-body text-sm font-medium">{sheet.sheetName}</span>
-                                                    {isEmpty ? (
-                                                        <span className="ml-2 font-mono text-xs" style={{ color: 'var(--muted)' }}>empty</span>
-                                                    ) : (
-                                                        <span className="ml-2 font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                                                            {sheet.rows.length.toLocaleString()} rows · {sheet.columns.length} cols
-                                                        </span>
-                                                    )}
-                                                </div>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
+                                                    <div
+                                                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border transition-colors"
+                                                        style={{
+                                                            borderColor: isSelected ? 'var(--amber)' : 'var(--border)',
+                                                            backgroundColor: isSelected ? 'var(--amber)' : 'transparent',
+                                                            color: 'var(--bg)',
+                                                        }}
+                                                    >
+                                                        {isSelected && <Check size={13} strokeWidth={3} />}
+                                                    </div>
+                                                    <span className="font-body text-sm font-medium">{sheet}</span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
                             </div>
                         ))}
                     </div>
 
-                    {/* Actions */}
+                    {error && (
+                        <p className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--amber)' }}>
+                            {error}
+                        </p>
+                    )}
+
                     <div className="mt-6 flex items-center justify-between animate-fade-in">
                         <button
                             onClick={onBack}
@@ -143,11 +157,20 @@ export function InspectScreen({ theme, onToggleTheme, onBack, files, onConfirm }
                         </button>
                         <button
                             onClick={handleConfirm}
-                            disabled={selectedCount === 0}
+                            disabled={selectedCount === 0 || loading}
                             className="btn-amber inline-flex items-center gap-2 rounded-xl px-6 py-3 font-display text-sm font-semibold disabled:opacity-50"
                         >
-                            Load {selectedCount} {selectedCount === 1 ? 'sheet' : 'sheets'}
-                            <ArrowRight size={16} strokeWidth={2.5} />
+                            {loading ? (
+                                <>
+                                    <Loader2 size={16} className="animate-spin-slow" />
+                                    Loading...
+                                </>
+                            ) : (
+                                <>
+                                    Load {selectedCount} {selectedCount === 1 ? 'sheet' : 'sheets'}
+                                    <ArrowRight size={16} strokeWidth={2.5} />
+                                </>
+                            )}
                         </button>
                     </div>
                 </div>
@@ -160,8 +183,4 @@ export function InspectScreen({ theme, onToggleTheme, onBack, files, onConfirm }
             </footer>
         </div>
     );
-}
-
-function sheetKey(fileName, sheetName) {
-    return `${fileName}::${sheetName}`;
 }

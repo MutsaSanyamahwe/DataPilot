@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { Send, Download, Loader2, RotateCcw, Table2, Sparkles, Database } from 'lucide-react';
-import { Logo } from '@/components/Logo';
-import { ThemeToggle } from '@/components/ThemeToggle';
-import { Chart } from '@/components/Chart';
-import { analyzeQuery } from '@/lib/queryAnalyzer';
-import { generateReport, downloadReport } from '@/lib/reportGenerator';
+import { Logo } from './Logo';
+import { ThemeToggle } from './ThemeToggle';
+import { Chart } from './Chart';
+import { analyzeQuery } from './lib/queryAnalyzer';
+import { generateReport, downloadReport } from './lib/reportGenerator';
 
 const SUGGESTED_QUESTIONS = [
     'How many rows are there?',
@@ -104,10 +104,10 @@ export function ChatScreen({ theme, onToggleTheme, onBack, tables }) {
                     Loaded:
                 </span>
                 {tables.map((t) => (
-                    <span key={t.name} className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                    <span key={t.table_name} className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
                         <Table2 size={11} style={{ color: 'var(--teal)' }} />
-                        {t.name}
-                        <span style={{ color: 'var(--muted)' }}>· {t.rowCount.toLocaleString()}</span>
+                        {t.table_name}
+                        <span style={{ color: 'var(--muted)' }}>· {t.rows.toLocaleString()}</span>
                     </span>
                 ))}
             </div>

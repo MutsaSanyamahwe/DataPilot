@@ -5,7 +5,7 @@ import pandas as pd
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 router = APIRouter()
 
@@ -63,10 +63,11 @@ async def inspect_files(files: List[UploadFile] = File(...)):
 
 
 # ---------- STEP 2: CONFIRM ----------
+from typing import Optional
 
 class SheetSelection(BaseModel):
     filename: str
-    sheets: List[str] = None  # None or omitted for CSVs
+    sheets: Optional[List[str]] = None
 
 
 class ConfirmUploadRequest(BaseModel):
