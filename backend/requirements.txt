@@ -1,10 +1,15 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
-psycopg2-binary
 python-dotenv
 anthropic
 pydantic-settings
 pandas
+numpy
 python-multipart
 openpyxl
+google-genai
+matplotlib
+seaborn
+reportlab
+chardet

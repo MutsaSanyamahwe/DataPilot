@@ -3,8 +3,9 @@ import { Send, Download, Loader2, RotateCcw, Table2, Sparkles, Database } from '
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { Chart } from './Chart';
-import { analyzeQuery } from './lib/queryAnalyzer';
-import { generateReport, downloadReport } from './lib/reportGenerator';
+import { generateReport, downloadReport, downloadReportPDF } from './lib/reportGenerator';
+
+const API_BASE = 'http://localhost:8000';
 
 const SUGGESTED_QUESTIONS = [
     'How many rows are there?',
@@ -13,15 +14,24 @@ const SUGGESTED_QUESTIONS = [
     'What is the distribution of categories?',
 ];
 
-export function ChatScreen({ theme, onToggleTheme, onBack, tables }) {
+export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    const [reportMenuOpen, setReportMenuOpen] = useState(false);
+    const [activeTable, setActiveTable] = useState(null); // table_name of the open popover, or null
     const scrollRef = useRef(null);
 
     useEffect(() => {
         scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
     }, [messages, loading]);
+
+    useEffect(() => {
+        if (!activeTable) return;
+        const handleClickOutside = () => setActiveTable(null);
+        document.addEventListener('click', handleClickOutside);
+        return () => document.removeEventListener('click', handleClickOutside);
+    }, [activeTable]);
 
     const sendQuestion = async (question) => {
         const q = question.trim();
@@ -33,24 +43,48 @@ export function ChatScreen({ theme, onToggleTheme, onBack, tables }) {
         setLoading(true);
 
         try {
-            const result = await analyzeQuery(q, tables);
+            const res = await fetch(`${API_BASE}/ask`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, question: q }),
+            });
+            if (!res.ok) {
+                const body = await res.json().catch(() => null);
+                throw new Error(body?.detail || `Server error: ${res.status}`);
+            }
+            const result = await res.json();
             const assistantMsg = {
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 text: result.text,
                 sql: result.sql,
                 chart: result.chart,
-                error: result.error,
             };
             setMessages((prev) => [...prev, assistantMsg]);
-        } catch {
+        } catch (err) {
             setMessages((prev) => [
                 ...prev,
-                { id: crypto.randomUUID(), role: 'assistant', text: 'Something went wrong running that query. Try rephrasing.', error: true },
+                {
+                    id: crypto.randomUUID(),
+                    role: 'assistant',
+                    text: err.message || 'Something went wrong running that query. Try rephrasing.',
+                    error: true,
+                },
             ]);
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleDownloadMarkdown = () => {
+        const report = generateReport(tables, messages);
+        downloadReport(report);
+        setReportMenuOpen(false);
+    };
+
+    const handleDownloadPDF = () => {
+        downloadReportPDF(tables, messages);
+        setReportMenuOpen(false);
     };
 
     const handleDownload = () => {
@@ -76,42 +110,89 @@ export function ChatScreen({ theme, onToggleTheme, onBack, tables }) {
                     <Logo onClick={onBack} />
                 </div>
                 <div className="flex items-center gap-3">
+
                     {hasMessages && (
-                        <button
-                            onClick={handleDownload}
-                            className="inline-flex items-center gap-1.5 rounded-lg surface px-3 py-1.5 font-mono text-xs font-medium transition-all hover:opacity-80"
-                        >
-                            <Download size={13} style={{ color: 'var(--teal)' }} />
-                            Report
-                        </button>
-                    )}
-                    {hasMessages && (
-                        <button
-                            onClick={handleReset}
-                            className="inline-flex items-center gap-1.5 rounded-lg surface px-3 py-1.5 font-mono text-xs font-medium transition-all hover:opacity-80"
-                        >
-                            <RotateCcw size={13} style={{ color: 'var(--muted)' }} />
-                            Reset
-                        </button>
+                        <div className="relative">
+                            <button
+                                onClick={() => setReportMenuOpen((v) => !v)}
+                                className="inline-flex items-center gap-1.5 rounded-lg surface px-3 py-1.5 font-mono text-xs font-medium transition-all hover:opacity-80"
+                            >
+                                <Download size={13} style={{ color: 'var(--teal)' }} />
+                                Report
+                            </button>
+                            {reportMenuOpen && (
+                                <div
+                                    className="absolute right-0 top-full mt-1 rounded-lg surface overflow-hidden z-30"
+                                    style={{ minWidth: '140px' }}
+                                >
+                                    <button
+                                        onClick={handleDownloadMarkdown}
+                                        className="w-full text-left px-3 py-2 font-mono text-xs hover:opacity-70 transition-opacity"
+                                    >
+                                        Markdown (.md)
+                                    </button>
+                                    <button
+                                        onClick={handleDownloadPDF}
+                                        className="w-full text-left px-3 py-2 font-mono text-xs hover:opacity-70 transition-opacity"
+                                        style={{ borderTop: '1px solid var(--border)' }}
+                                    >
+                                        PDF (.pdf)
+                                    </button>
+                                </div>
+                            )}
+                        </div>
                     )}
                     <ThemeToggle theme={theme} onToggle={onToggleTheme} />
                 </div>
             </nav>
 
             {/* Tables context bar */}
-            <div className="flex shrink-0 items-center gap-2 overflow-x-auto px-6 py-2 scroll-thin" style={{ borderBottom: '1px solid var(--border)' }}>
+            <div className="relative flex shrink-0 items-center gap-2 overflow-x-auto px-6 py-2 scroll-thin" style={{ borderBottom: '1px solid var(--border)' }}>
                 <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
                     Loaded:
                 </span>
                 {tables.map((t) => (
-                    <span key={t.table_name} className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                        <Table2 size={11} style={{ color: 'var(--teal)' }} />
-                        {t.table_name}
-                        <span style={{ color: 'var(--muted)' }}>· {t.rows.toLocaleString()}</span>
-                    </span>
+                    <div key={t.table_name} className="relative">
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setActiveTable((prev) => (prev === t.table_name ? null : t.table_name));
+                            }}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs transition-colors"
+                            style={{
+                                background: 'var(--surface)',
+                                border: `1px solid ${activeTable === t.table_name ? 'var(--amber)' : 'var(--border)'}`,
+                            }}
+                        >
+                            <Table2 size={11} style={{ color: 'var(--teal)' }} />
+                            {t.table_name}
+                            <span style={{ color: 'var(--muted)' }}>· {t.rows.toLocaleString()}</span>
+                        </button>
+
+                        {activeTable === t.table_name && (
+                            <div
+                                className="absolute left-0 top-full mt-1.5 rounded-lg surface p-3 z-30 animate-fade-in"
+                                style={{ minWidth: '220px', maxWidth: '280px' }}
+                            >
+                                <p className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--muted)' }}>
+                                    Columns
+                                </p>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {t.columns.map((col) => (
+                                        <span
+                                            key={col}
+                                            className="font-mono text-xs px-1.5 py-0.5 rounded"
+                                            style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+                                        >
+                                            {col}
+                                        </span>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 ))}
             </div>
-
             {/* Chat area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-6">
                 <div className="mx-auto max-w-3xl">

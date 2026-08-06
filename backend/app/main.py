@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from app.db  import engine
 from app.upload import router as upload_router
+from app.ask import router as ask_router
 
 
 app = FastAPI()
@@ -16,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(upload_router)
+app.include_router(ask_router)
 
 @app.get("/health")
 def health():

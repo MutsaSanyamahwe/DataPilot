@@ -1,3 +1,19 @@
+import { useRef } from 'react';
+
+function downloadSVG(svgElement, filename) {
+    const serializer = new XMLSerializer();
+    const source = serializer.serializeToString(svgElement);
+    const blob = new Blob([source], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
 export function Chart({ spec }) {
     if (spec.kind === 'table') {
         return <TableChart spec={spec} />;
@@ -11,15 +27,43 @@ export function Chart({ spec }) {
     if (spec.kind === 'pie') {
         return <PieChart spec={spec} />;
     }
+    if (spec.kind === 'stat') {
+        return <StatChart spec={spec} />;
+    }
     return null;
 }
 
-function ChartCard({ title, children }) {
+function ChartCard({ title, children, onDownloadSVG }) {
     return (
         <div className="mt-3 rounded-xl surface p-4">
-            <p className="mb-3 font-mono text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{title}</p>
+            <div className="mb-3 flex items-center justify-between">
+                <p className="font-mono text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{title}</p>
+                {onDownloadSVG && (
+                    <button
+                        onClick={onDownloadSVG}
+                        className="font-mono text-[10px] uppercase tracking-wider hover:opacity-70 transition-opacity"
+                        style={{ color: 'var(--teal)' }}
+                    >
+                        Download SVG
+                    </button>
+                )}
+            </div>
             {children}
         </div>
+    );
+}
+
+function StatChart({ spec }) {
+    const formatted = Number.isInteger(spec.value)
+        ? spec.value.toLocaleString()
+        : spec.value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+    return (
+        <ChartCard title={spec.title}>
+            <p className="font-display text-4xl font-bold" style={{ color: 'var(--amber)' }}>
+                {formatted}
+            </p>
+        </ChartCard>
     );
 }
 
@@ -61,6 +105,7 @@ function BarChart({ spec }) {
 }
 
 function LineChart({ spec }) {
+    const svgRef = useRef(null);
     const max = Math.max(...spec.values, 1);
     const min = Math.min(...spec.values, 0);
     const range = max - min || 1;
@@ -78,9 +123,9 @@ function LineChart({ spec }) {
     const areaD = `${pathD} L ${w} ${h} L 0 ${h} Z`;
 
     return (
-        <ChartCard title={spec.title}>
+        <ChartCard title={spec.title} onDownloadSVG={() => downloadSVG(svgRef.current, `${spec.title || 'chart'}.svg`)}>
             <div className="relative w-full" style={{ height: '180px' }}>
-                <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full" style={{ overflow: 'visible' }}>
+                <svg ref={svgRef} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="h-full w-full" style={{ overflow: 'visible' }}>
                     <defs>
                         <linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="var(--teal)" stopOpacity="0.3" />
