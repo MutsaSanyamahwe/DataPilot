@@ -1,0 +1,46 @@
+employee_id,name,department,region,salary,hire_date
+1,David Lee,Sales,South,71000,2018-03-13
+2,Rachel Cohen,Engineering,West,58000,2017-02-16
+3,Henry Patel,Marketing ,South,102000,2018-09-23
+4,Henry Patel,Support,South,58000,2023-03-23
+5,Karen Liu,Marketing,South,71000,2023-06-13
+6,Carla Diaz,Finance,East,82000,2023-06-18
+7,Bob Smith,Finance, East ,61000,2020-02-27
+8,Jack Wilson,null,West,110000,2018-02-11
+9,Henry Patel,Support,South,71000,2023-02-22
+10,Isla Brown,Finance,West,68000,2019-06-16
+11,Isla Brown,Finance,East,102000,2022-04-15
+12,Olivia Davis,Finance,South,102000,2018-06-11
+13,Henry Patel,Marketing,North,88000,2019-02-16
+14,Sam Torres,Engineering,South,95000,2020-08-14
+15,Isla Brown,Support,West,102000,2021-05-28
+16,Noah Chen,n/a,South,82000,2018-03-26
+17,Peter Nguyen,Engineering,West,61000,2018-03-23
+18,Tina Park,Finance,North,88000,2021-08-26
+19,Isla Brown,--,North,61000,2022-09-18
+20,Karen Liu,Marketing,East,88000,2018-08-10
+21,Isla Brown,Marketing ,West,102000,2017-05-26
+22,Tina Park,Marketing,South,82000,2023-03-27
+23,Quinn Adams,Engineering,North,95000,2017-02-21
+24,Jack Wilson,Engineering,West,71000,2021-02-12
+25,Peter Nguyen,Finance, East ,68000,2018-08-27
+26,Frank Wu,Sales,South ,110000,2020-04-27
+27,Grace Kim,Finance,South,82000,2020-09-24
+28,David Lee,Engineering,East,61000,2019-01-28
+29,Rachel Cohen,Finance,East,58000,2017-01-17
+30,Carla Diaz,Marketing,South,61000,2021-04-18
+31,Peter Nguyen,Support, East ,68000,2022-08-17
+32,Peter Nguyen,Sales,North,61000,2017-07-21
+33,Noah Chen,Sales,South,58000,2022-02-11
+34,Maria Garcia,Sales,East,71000,2018-04-27
+35,Olivia Davis,Support,West,68000,2019-08-17
+36,Carla Diaz,Support,west,61000,2017-09-10
+37,Carla Diaz,Engineering,East,88000,2020-08-16
+38,Maria Garcia,Support,East,88000,2017-07-18
+39,Olivia Davis,Support,West,102000,2022-08-14
+40,Grace Kim,Support,South,58000,2021-09-11
+3,Henry Patel,Marketing ,South,102000,2018-09-23
+32,Peter Nguyen,Sales,North,61000,2017-07-21
+4,Henry Patel,Support,South,58000,2023-03-23
+22,Tina Park,Marketing,South,82000,2023-03-27
+28,David Lee,Engineering,East,61000,2019-01-28

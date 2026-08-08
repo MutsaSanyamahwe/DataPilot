@@ -24,5 +24,3 @@ def health():
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
         return {"status": "ok", "db": "connected"}
-
-

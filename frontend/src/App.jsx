@@ -13,6 +13,7 @@ function App() {
 
   const [sessionId, setSessionId] = useState(null)
   const [inspectFiles, setInspectFiles] = useState([])
+  const [selections, setSelections] = useState([])
   const [loadedTables, setLoadedTables] = useState([])
 
   useEffect(() => {
@@ -26,6 +27,7 @@ function App() {
   const resetSession = () => {
     setSessionId(null)
     setInspectFiles([])
+    setSelections([])
     setLoadedTables([])
     setView('landing')
   }
@@ -57,8 +59,12 @@ function App() {
         onBack={goTo('upload')}
         sessionId={sessionId}
         files={inspectFiles}
-        onConfirm={(data) => {
-          setLoadedTables(data.tables)
+        // InspectScreen no longer calls the backend itself -- it just hands
+        // off { sessionId, selections }. ConfirmScreen owns the actual
+        // /upload/preview + /upload/confirm calls.
+        onConfirm={({ sessionId: sid, selections: sel }) => {
+          setSessionId(sid)
+          setSelections(sel)
           setView('confirm')
         }}
       />
@@ -72,8 +78,14 @@ function App() {
         onToggleTheme={toggleTheme}
         onBack={goTo('inspect')}
         sessionId={sessionId}
-        tables={loadedTables}
-        onProceed={goTo('chat')}
+        selections={selections}
+        // ConfirmScreen calls /upload/confirm itself and passes the real
+        // response here once the user commits -- that's where "tables"
+        // actually comes from now.
+        onProceed={(data) => {
+          setLoadedTables(data.tables)
+          setView('chat')
+        }}
       />
     )
   }

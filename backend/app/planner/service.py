@@ -1,18 +1,19 @@
 # planner/service.py
 #
-# This file is the ONLY place in the app that talks to Gemini for planning.
-# Its job: take a user's question + a summary of their dataset, ask Gemini
-# to fill out an AnalysisPlan, and validate that plan before handing it
-# to anything else. Nothing downstream (analysis engine, API route) should
-# ever construct a plan itself — they all go through get_validated_plan().
+# The only file that talks to Gemini for planning. get_validated_plan()
+# is the single entry point everything else should use -- it calls the
+# LLM, checks the operation is supported, validates params, and raises a
+# clear error otherwise. Requires GOOGLE_API_KEY in .env (see config.py).
 
 from google import genai
 from google.genai import types
+from google.genai.errors import ClientError
 from pydantic import ValidationError
 
-from config import settings
-from planner.schemas import AnalysisPlan, OPERATION_PARAM_MODELS
-from planner.prompt import build_planner_prompt
+from app.config import settings
+from app.planner.schemas import AnalysisPlan, OPERATION_PARAM_MODELS
+from app.planner.prompt import build_planner_prompt
+from app.llm_errors import LLMRateLimitError, LLMServiceError
 
 
 class UnsupportedOperationError(Exception):
@@ -30,9 +31,6 @@ class InvalidPlanError(Exception):
         super().__init__(f"Invalid params for '{operation}': {errors}")
 
 
-# One client, created once at import time and reused for every request.
-# Reading the key from settings (which reads it from .env) rather than
-# hardcoding it anywhere.
 _client = genai.Client(api_key=settings.google_api_key)
 
 
@@ -40,7 +38,10 @@ def get_validated_plan(user_question: str, dataset_profile: dict) -> tuple[Analy
     """
     Calls Gemini to produce an AnalysisPlan, then validates it.
     Returns (plan, validated_params) on success.
-    Raises UnsupportedOperationError or InvalidPlanError on failure.
+    Raises UnsupportedOperationError or InvalidPlanError on a bad plan,
+    or LLMRateLimitError / LLMServiceError on a Gemini API failure --
+    shared exception types with explainer/service.py so api/ask.py can
+    handle both LLM calls with one except block.
     """
     plan = _call_planner_llm(user_question, dataset_profile)
 
@@ -56,25 +57,21 @@ def get_validated_plan(user_question: str, dataset_profile: dict) -> tuple[Analy
 
 
 def _call_planner_llm(user_question: str, dataset_profile: dict) -> AnalysisPlan:
-    """
-    Sends the question + dataset profile to Gemini and asks it to return
-    JSON matching the AnalysisPlan schema exactly. Gemini's structured
-    output mode enforces the shape at generation time — passing our
-    Pydantic model directly as response_schema means we don't have to
-    manually parse or repair JSON.
-    """
     prompt = build_planner_prompt(user_question, dataset_profile)
 
-    response = _client.models.generate_content(
-        model=settings.planner_model,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            response_schema=AnalysisPlan,
-            temperature=settings.planner_temperature,
-        ),
-    )
+    try:
+        response = _client.models.generate_content(
+            model=settings.planner_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                response_schema=AnalysisPlan,
+                temperature=settings.planner_temperature,
+            ),
+        )
+    except ClientError as e:
+        if e.status_code == 429:
+            raise LLMRateLimitError() from e
+        raise LLMServiceError(str(e)) from e
 
-    # response.parsed is already an AnalysisPlan instance when response_schema
-    # is a Pydantic model — the SDK validates and instantiates it for us.
     return response.parsed

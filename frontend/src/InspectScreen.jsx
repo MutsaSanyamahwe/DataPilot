@@ -1,9 +1,7 @@
 import { useState } from 'react';
-import { FileSpreadsheet, Check, ArrowRight, ArrowLeft, Layers, Loader2 } from 'lucide-react';
+import { FileSpreadsheet, Check, ArrowRight, ArrowLeft, Layers } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-
-const API_BASE = 'http://localhost:8000';
 
 export function InspectScreen({ theme, onToggleTheme, onBack, sessionId, files = [], onConfirm }) {
     const [selection, setSelection] = useState(() => {
@@ -15,8 +13,6 @@ export function InspectScreen({ theme, onToggleTheme, onBack, sessionId, files =
         }
         return map;
     });
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
 
     const toggleSheet = (filename, sheet) => {
         setSelection((prev) => {
@@ -33,32 +29,14 @@ export function InspectScreen({ theme, onToggleTheme, onBack, sessionId, files =
         return sum + (selection[f.filename]?.length || 0);
     }, 0);
 
-    const handleConfirm = async () => {
-        setLoading(true);
-        setError(null);
-
+    // No network call here -- ConfirmScreen owns preview/confirm requests.
+    // This screen's only job is picking sheets and handing off the selection.
+    const handleContinue = () => {
         const selections = files.map((f) => ({
             filename: f.filename,
             sheets: f.type === 'excel' ? (selection[f.filename] || []) : null,
         }));
-
-        try {
-            const res = await fetch(`${API_BASE}/upload/confirm`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: sessionId, selections }),
-            });
-            if (!res.ok) {
-                const body = await res.json().catch(() => null);
-                throw new Error(body?.detail || `Server error: ${res.status}`);
-            }
-            const data = await res.json();
-            onConfirm(data);
-        } catch (err) {
-            setError(err.message || 'Could not load the selected data.');
-        } finally {
-            setLoading(false);
-        }
+        onConfirm({ sessionId, selections });
     };
 
     return (
@@ -140,12 +118,6 @@ export function InspectScreen({ theme, onToggleTheme, onBack, sessionId, files =
                         ))}
                     </div>
 
-                    {error && (
-                        <p className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--amber)' }}>
-                            {error}
-                        </p>
-                    )}
-
                     <div className="mt-6 flex items-center justify-between animate-fade-in">
                         <button
                             onClick={onBack}
@@ -156,21 +128,12 @@ export function InspectScreen({ theme, onToggleTheme, onBack, sessionId, files =
                             Back
                         </button>
                         <button
-                            onClick={handleConfirm}
-                            disabled={selectedCount === 0 || loading}
+                            onClick={handleContinue}
+                            disabled={selectedCount === 0}
                             className="btn-amber inline-flex items-center gap-2 rounded-xl px-6 py-3 font-display text-sm font-semibold disabled:opacity-50"
                         >
-                            {loading ? (
-                                <>
-                                    <Loader2 size={16} className="animate-spin-slow" />
-                                    Loading...
-                                </>
-                            ) : (
-                                <>
-                                    Load {selectedCount} {selectedCount === 1 ? 'sheet' : 'sheets'}
-                                    <ArrowRight size={16} strokeWidth={2.5} />
-                                </>
-                            )}
+                            Continue with {selectedCount} {selectedCount === 1 ? 'sheet' : 'sheets'}
+                            <ArrowRight size={16} strokeWidth={2.5} />
                         </button>
                     </div>
                 </div>
