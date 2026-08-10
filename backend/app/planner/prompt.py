@@ -1,17 +1,9 @@
 # planner/prompt.py
 #
-# This file builds the text prompt sent to Gemini in planner/service.py.
-# It does NOT call the API itself — it just assembles a string.
-# Splitting it out from service.py means we can tweak wording, add
-# operations, or A/B test prompt phrasing without touching the API call
-# or validation logic at all.
-#
-# IMPORTANT: right now we only describe groupby_agg to the LLM, even
-# though the Operation enum in schemas.py lists 9 operations. If we
-# describe operations we haven't built param schemas for, the LLM will
-# happily pick them, and get_validated_plan() will reject the plan with
-# UnsupportedOperationError. Better to just not offer them yet — keeps
-# the LLM's choices matching what the backend can actually do.
+# Builds the text prompt sent to Gemini in planner/service.py. Does NOT
+# call the API itself. Only describes operations that have a param model
+# in schemas.py's OPERATION_PARAM_MODELS -- those two lists must be kept
+# in sync as new operations get built.
 
 OPERATIONS_GUIDE = """
 Available operation:
@@ -19,9 +11,9 @@ Available operation:
 - groupby_agg: Groups rows by one column and aggregates a metric column.
   Use this for questions like "average salary by department",
   "total sales per region", "count of orders by status".
-  Required params: group_by (column to group by), metric (column to aggregate),
+  Fill in: group_by (column to group by), metric (column to aggregate),
   aggregation (one of: mean, sum, count, median, min, max, std).
-  Optional params: sort_by (value_asc, value_desc, label), limit (max rows to return).
+  Optional: sort_by (value_asc, value_desc, label), limit (max rows to return).
 """
 
 CHART_GUIDE = """
@@ -36,16 +28,14 @@ def build_planner_prompt(user_question: str, dataset_profile: dict) -> str:
     """
     Builds the full prompt string sent to Gemini.
 
-    dataset_profile is expected to look like:
+    dataset_profile comes from profiling.profile_dataset(df) and looks like:
     {
+        "row_count": 1200,
         "columns": [
-            {"name": "department", "dtype": "string", "sample_values": ["Sales", "Engineering"]},
-            {"name": "salary", "dtype": "float", "sample_values": [65000, 82000]},
-        ],
-        "row_count": 1200
+            {"name": "department", "dtype": "string", "sample_values": [...]},
+            {"name": "salary", "dtype": "float", "sample_values": [...], "min": ..., "max": ..., "mean": ...},
+        ]
     }
-    This comes from the profiling module (not built yet) — for now you can
-    pass this dict in by hand to test.
     """
     columns_description = "\n".join(
         f"- {col['name']} ({col['dtype']}), example values: {col['sample_values']}"

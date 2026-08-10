@@ -14,8 +14,8 @@ import pandas as pd
 from dataclasses import dataclass
 from typing import Any
 
-from planner.schemas import Operation, AnalysisPlan
-from analysis.operations import groupby_agg
+from app.planner.schemas import Operation, AnalysisPlan
+from app.analysis.operations import groupby_agg
 
 
 @dataclass

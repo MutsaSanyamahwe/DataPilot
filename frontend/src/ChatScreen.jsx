@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Download, Loader2, RotateCcw, Table2, Sparkles, Database } from 'lucide-react';
+import { Send, Download, Loader2, RotateCcw, Table2, Sparkles, Database, ArrowUpRight } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { Chart } from './Chart';
@@ -57,8 +57,8 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                 id: crypto.randomUUID(),
                 role: 'assistant',
                 text: result.text,
-                sql: result.sql,
                 chart: result.chart,
+                followUpQuestions: result.follow_up_questions || [],
             };
             setMessages((prev) => [...prev, assistantMsg]);
         } catch (err) {
@@ -67,7 +67,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                 {
                     id: crypto.randomUUID(),
                     role: 'assistant',
-                    text: err.message || 'Something went wrong running that query. Try rephrasing.',
+                    text: err.message || 'Something went wrong answering that. Try rephrasing.',
                     error: true,
                 },
             ]);
@@ -85,11 +85,6 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
     const handleDownloadPDF = () => {
         downloadReportPDF(tables, messages);
         setReportMenuOpen(false);
-    };
-
-    const handleDownload = () => {
-        const report = generateReport(tables, messages);
-        downloadReport(report);
     };
 
     const handleReset = () => {
@@ -146,7 +141,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                 </div>
             </nav>
 
-            {/* Tables context bar */}
+            {/* Tables context bar -- click a table pill to see its column names */}
             <div className="relative flex shrink-0 items-center gap-2 overflow-x-auto px-6 py-2 scroll-thin" style={{ borderBottom: '1px solid var(--border)' }}>
                 <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
                     Loaded:
@@ -203,7 +198,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                             </div>
                             <h2 className="font-display text-2xl font-bold">Ask anything about your data</h2>
                             <p className="mt-2 max-w-md font-body text-sm" style={{ color: 'var(--muted)' }}>
-                                I'll translate your question into SQL, run it against your loaded tables, and return the answer with charts when useful.
+                                I'll figure out the right analysis, run it directly against your data, and explain what I find — with charts when useful.
                             </p>
                             <div className="mt-6 flex flex-wrap justify-center gap-2">
                                 {SUGGESTED_QUESTIONS.map((q) => (
@@ -220,7 +215,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                     )}
 
                     {messages.map((msg) => (
-                        <MessageBubble key={msg.id} msg={msg} />
+                        <MessageBubble key={msg.id} msg={msg} onFollowUpClick={sendQuestion} />
                     ))}
 
                     {loading && (
@@ -230,7 +225,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                             </div>
                             <div className="flex items-center gap-1.5">
                                 <Loader2 size={14} className="animate-spin-slow" style={{ color: 'var(--muted)' }} />
-                                <span className="font-mono text-xs" style={{ color: 'var(--muted)' }}>Running query...</span>
+                                <span className="font-mono text-xs" style={{ color: 'var(--muted)' }}>Analyzing...</span>
                             </div>
                         </div>
                     )}
@@ -268,7 +263,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
     );
 }
 
-function MessageBubble({ msg }) {
+function MessageBubble({ msg, onFollowUpClick }) {
     const isUser = msg.role === 'user';
 
     if (isUser) {
@@ -297,16 +292,24 @@ function MessageBubble({ msg }) {
                     <p className="font-body text-sm leading-relaxed" style={{ color: 'var(--text)' }}>
                         {renderMarkdown(msg.text)}
                     </p>
-                    {msg.sql && (
-                        <div className="mt-3 rounded-lg p-3" style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                            <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>SQL</p>
-                            <pre className="overflow-x-auto scroll-thin font-mono text-xs leading-relaxed" style={{ color: 'var(--teal)' }}>
-                                {msg.sql}
-                            </pre>
-                        </div>
-                    )}
                     {msg.chart && <Chart spec={msg.chart} />}
                 </div>
+
+                {msg.followUpQuestions?.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5 animate-fade-in">
+                        {msg.followUpQuestions.map((q) => (
+                            <button
+                                key={q}
+                                onClick={() => onFollowUpClick(q)}
+                                className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 font-body text-xs transition-all hover:opacity-80"
+                                style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--muted)' }}
+                            >
+                                {q}
+                                <ArrowUpRight size={11} style={{ color: 'var(--teal)' }} />
+                            </button>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );

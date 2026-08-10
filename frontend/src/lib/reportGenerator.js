@@ -9,13 +9,16 @@ export function generateReport(tables, messages) {
   lines.push("");
   lines.push("## Loaded Datasets");
   lines.push("");
+  // NOTE: tables come from /upload/confirm as { table_name, rows, columns },
+  // where columns is a flat array of column-name strings (no type info
+  // attached). Previously this read t.name/t.source/t.rowCount and
+  // treated columns as {name, type} objects -- a shape that doesn't
+  // match what the backend actually returns, so this section was
+  // silently rendering as "undefined" before this fix.
   for (const t of tables) {
-    lines.push(`### ${t.name}`);
-    lines.push(`- **Source:** ${t.source}`);
-    lines.push(`- **Rows:** ${t.rowCount.toLocaleString()}`);
-    lines.push(
-      `- **Columns:** ${t.columns.map((c) => `\`${c.name}\` (${c.type})`).join(", ")}`,
-    );
+    lines.push(`### ${t.table_name}`);
+    lines.push(`- **Rows:** ${t.rows.toLocaleString()}`);
+    lines.push(`- **Columns:** ${t.columns.map((c) => `\`${c}\``).join(", ")}`);
     lines.push("");
   }
   lines.push("---");
@@ -37,12 +40,6 @@ export function generateReport(tables, messages) {
     lines.push("");
     lines.push(pair.a.text);
     lines.push("");
-    if (pair.a.sql) {
-      lines.push("```sql");
-      lines.push(pair.a.sql);
-      lines.push("```");
-      lines.push("");
-    }
     if (pair.a.chart && pair.a.chart.kind !== "table") {
       lines.push(`**Chart:** ${pair.a.chart.title}`);
       lines.push("");
@@ -56,6 +53,13 @@ export function generateReport(tables, messages) {
         }
         lines.push("");
       }
+    }
+    if (pair.a.followUpQuestions?.length) {
+      lines.push("**Suggested follow-ups:**");
+      for (const q of pair.a.followUpQuestions) {
+        lines.push(`- ${q}`);
+      }
+      lines.push("");
     }
     lines.push("---");
     lines.push("");
@@ -113,7 +117,7 @@ export function downloadReportPDF(tables, messages) {
       <p style="font-weight:600;margin-bottom:6px;">Q: ${escapeHtml(pair.q)}</p>
       <p style="margin-bottom:8px;">${escapeHtml(pair.a.text)}</p>
       ${pair.a.chart ? renderChartHtml(pair.a.chart) : ""}
-      ${pair.a.sql ? `<pre style="background:#f4f4f4;padding:10px;border-radius:6px;font-size:12px;overflow-x:auto;margin-top:8px;">${escapeHtml(pair.a.sql)}</pre>` : ""}
+      ${renderFollowUpsHtml(pair.a.followUpQuestions)}
     </div>
   `,
     )
@@ -161,6 +165,19 @@ export function downloadReportPDF(tables, messages) {
     printWindow.focus();
     printWindow.print();
   };
+}
+
+function renderFollowUpsHtml(followUpQuestions) {
+  if (!followUpQuestions?.length) return "";
+  const items = followUpQuestions
+    .map((q) => `<li style="margin-bottom:2px;">${escapeHtml(q)}</li>`)
+    .join("");
+  return `
+    <div style="margin-top:8px;">
+      <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:0.05em;">Suggested follow-ups</span>
+      <ul style="margin:4px 0 0 0;padding-left:18px;font-size:12px;color:#444;">${items}</ul>
+    </div>
+  `;
 }
 
 function renderChartHtml(chart) {

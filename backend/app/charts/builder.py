@@ -18,7 +18,7 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from analysis.registry import AnalysisResult
+from app.analysis.registry import AnalysisResult
 
 MAX_PIE_SLICES = 6
 MAX_TABLE_ROWS = 50
