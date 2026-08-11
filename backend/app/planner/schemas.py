@@ -36,6 +36,9 @@ class Operation(str, Enum):
     COMPARISON = "comparison"
     OUTLIER_DETECTION = "outlier_detection"
     TOP_N = "top_n"
+    FILTER = "filter"
+    DISTINCT = "distinct"
+    SAMPLE = "sample"
 
 
 class ChartType(str, Enum):
@@ -62,9 +65,56 @@ class GroupByAggParams(BaseModel):
     limit: Optional[int] = None
 
 
+class TopNRowsParams(BaseModel):
+    """Raw row preview -- no aggregation. 'Show me the top 10 rows'."""
+    n: int = 10
+    sort_column: Optional[str] = None  # None = original row order, no sorting
+    sort_ascending: bool = False
+
+
+class DescribeDatasetParams(BaseModel):
+    """No inputs needed -- always describes the whole dataset (row count,
+    column names, types, non-null counts). Empty on purpose."""
+    pass
+
+
+class DistributionParams(BaseModel):
+    """Value counts for one column. 'What's the distribution of departments?'"""
+    column: str
+    limit: Optional[int] = None  # top N categories by count; None = all
+
+
+class FilterParams(BaseModel):
+    """Row-level filtering. 'Show me employees in Sales earning over 70000.'"""
+    filter_column: str
+    filter_operator: Literal[
+        "equals", "not_equals", "greater_than", "less_than",
+        "greater_or_equal", "less_or_equal", "contains",
+    ]
+    filter_value: str  # kept as string; coerced to numeric at runtime if the column is numeric
+    limit: Optional[int] = None  # row cap on the (possibly large) filtered result
+
+
+class DistinctParams(BaseModel):
+    """Unique values in one column, no counts. 'What departments exist?'"""
+    column: str
+    limit: Optional[int] = None
+
+
+class SampleParams(BaseModel):
+    """A random sample of rows, as opposed to top_n's ordered preview."""
+    n: int = 10
+
+
 # Maps each Operation to the param model that validates it.
 OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.GROUPBY_AGG: GroupByAggParams,
+    Operation.TOP_N: TopNRowsParams,
+    Operation.DESCRIBE: DescribeDatasetParams,
+    Operation.DISTRIBUTION: DistributionParams,
+    Operation.FILTER: FilterParams,
+    Operation.DISTINCT: DistinctParams,
+    Operation.SAMPLE: SampleParams,
 }
 
 
@@ -77,19 +127,50 @@ class AnalysisPlan(BaseModel):
     # would otherwise be a nested `params: dict` -- see module docstring
     # for why that's not possible with Gemini's Developer API.
     #
-    # Currently only groupby_agg's fields exist here, since it's the only
-    # operation built. When a new operation is added, add its param
-    # fields here too (Optional, matching its param model), and extend
-    # validate_params() below to build the right model for that operation.
+    # When a new operation is added: add its param fields here too
+    # (Optional, matching its param model), and extend validate_params()
+    # below to build the right model for that operation.
+
+    # groupby_agg fields
     group_by: Optional[str] = Field(default=None, description="Column to group by")
     metric: Optional[str] = Field(default=None, description="Column to aggregate")
     aggregation: Optional[Literal["mean", "sum", "count", "median", "min", "max", "std"]] = Field(
         default=None, description="How to aggregate the metric column"
     )
     sort_by: Optional[Literal["value_asc", "value_desc", "label"]] = Field(
-        default="value_desc", description="How to sort the result"
+        default="value_desc", description="How to sort a groupby_agg result"
     )
-    limit: Optional[int] = Field(default=None, description="Max rows to return, if the user asked for a top-N style limit")
+    limit: Optional[int] = Field(
+        default=None,
+        description="Max rows to return -- used as row count for top_n, "
+        "or max categories for distribution, or row limit for groupby_agg",
+    )
+
+    # top_n fields
+    sort_column: Optional[str] = Field(
+        default=None, description="Column to sort by for top_n (e.g. 'salary' for highest-paid). "
+        "Leave unset to just show rows in their original order."
+    )
+    sort_ascending: Optional[bool] = Field(
+        default=False, description="For top_n: True for lowest-first, False for highest-first"
+    )
+
+    # distribution fields
+    column: Optional[str] = Field(
+        default=None, description="Column to compute a value-count distribution for, "
+        "or to get distinct values from"
+    )
+
+    # filter fields
+    filter_column: Optional[str] = Field(default=None, description="Column to filter on")
+    filter_operator: Optional[Literal[
+        "equals", "not_equals", "greater_than", "less_than",
+        "greater_or_equal", "less_or_equal", "contains",
+    ]] = Field(default=None, description="Comparison to apply for filtering")
+    filter_value: Optional[str] = Field(
+        default=None, description="Value to compare against (as text -- numbers are "
+        "coerced automatically if the column is numeric)"
+    )
 
     chart: ChartType
     explanation_intent: str = Field(
@@ -105,12 +186,10 @@ class AnalysisPlan(BaseModel):
         pulling from this plan's flattened fields. Call this right after
         the planner returns a plan, before running any analysis.
 
-        Raises ValueError if the operation has no param model registered.
-        Raises pydantic.ValidationError if the required fields for this
-        operation weren't filled in by the LLM (e.g. group_by is None) --
-        this is exactly the "planner picked an operation but didn't fill
-        in the params it needs" failure case, caught the same way it was
-        before this field-flattening change.
+        Raises ValueError if the operation has no param model registered,
+        or has no field-gathering branch below yet. Raises
+        pydantic.ValidationError if the required fields for this operation
+        weren't filled in by the LLM (e.g. group_by is None for groupby_agg).
         """
         model = OPERATION_PARAM_MODELS.get(self.operation)
         if model is None:
@@ -125,6 +204,35 @@ class AnalysisPlan(BaseModel):
                 "aggregation": self.aggregation,
                 "sort_by": self.sort_by,
                 "limit": self.limit,
+            }
+        elif self.operation == Operation.TOP_N:
+            raw = {
+                "n": self.limit if self.limit is not None else 10,
+                "sort_column": self.sort_column,
+                "sort_ascending": bool(self.sort_ascending),
+            }
+        elif self.operation == Operation.DESCRIBE:
+            raw = {}
+        elif self.operation == Operation.DISTRIBUTION:
+            raw = {
+                "column": self.column,
+                "limit": self.limit,
+            }
+        elif self.operation == Operation.FILTER:
+            raw = {
+                "filter_column": self.filter_column,
+                "filter_operator": self.filter_operator,
+                "filter_value": self.filter_value,
+                "limit": self.limit,
+            }
+        elif self.operation == Operation.DISTINCT:
+            raw = {
+                "column": self.column,
+                "limit": self.limit,
+            }
+        elif self.operation == Operation.SAMPLE:
+            raw = {
+                "n": self.limit if self.limit is not None else 10,
             }
         else:
             # New operations need their own field-gathering branch here,

@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.planner.schemas import Operation, AnalysisPlan
-from app.analysis.operations import groupby_agg
+from app.analysis.operations import (
+    groupby_agg, top_n_rows, describe_dataset, distribution,
+    filter_rows, distinct_values, sample_rows,
+)
 
 
 @dataclass
@@ -37,6 +40,12 @@ class AnalysisResult:
 # in sync deliberately, one operation added to both at a time.
 OPERATION_REGISTRY = {
     Operation.GROUPBY_AGG: groupby_agg,
+    Operation.TOP_N: top_n_rows,
+    Operation.DESCRIBE: describe_dataset,
+    Operation.DISTRIBUTION: distribution,
+    Operation.FILTER: filter_rows,
+    Operation.DISTINCT: distinct_values,
+    Operation.SAMPLE: sample_rows,
 }
 
 

@@ -6,7 +6,7 @@
 # in sync as new operations get built.
 
 OPERATIONS_GUIDE = """
-Available operation:
+Available operations:
 
 - groupby_agg: Groups rows by one column and aggregates a metric column.
   Use this for questions like "average salary by department",
@@ -14,13 +14,59 @@ Available operation:
   Fill in: group_by (column to group by), metric (column to aggregate),
   aggregation (one of: mean, sum, count, median, min, max, std).
   Optional: sort_by (value_asc, value_desc, label), limit (max rows to return).
+
+- top_n: Shows a raw preview of individual rows -- no grouping or math.
+  Use this for questions like "show me the top 10 rows", "show me the
+  5 highest-paid employees", "give me a sample of the data".
+  Fill in: limit (how many rows -- defaults to 10 if the user didn't say).
+  Optional: sort_column (column to rank by, e.g. "salary" for "highest-paid"
+  -- leave unset for a plain, unranked preview), sort_ascending (True for
+  lowest-first, False for highest-first).
+
+- describe: Gives an overview of the whole dataset -- row count, column
+  names, data types, and how many non-empty values each column has.
+  Use this for questions like "how many rows are there", "what columns
+  are in the data", "give me an overview of this dataset".
+  No fields to fill in -- always describes the whole dataset.
+
+- distribution: Counts how many rows fall into each distinct value of one
+  column. Use this for questions like "what's the distribution of
+  departments", "how many of each category are there", "breakdown by region".
+  Fill in: column (the column to count categories in).
+  Optional: limit (only show the top N categories, if there are many).
+
+- filter: Shows rows matching a condition -- no aggregation. Use this for
+  questions like "show me employees in Sales", "which rows have salary
+  over 100000", "find rows where department is Marketing".
+  Fill in: filter_column, filter_operator (one of: equals, not_equals,
+  greater_than, less_than, greater_or_equal, less_or_equal, contains),
+  filter_value (as text, even for numbers).
+  Optional: limit (cap on rows returned, useful if the match is broad).
+
+- distinct: Lists the unique values in one column, with no counts. Use
+  this for questions like "what departments exist", "what are the
+  possible values in region". If the user also wants counts (e.g. "how
+  many of each"), use distribution instead.
+  Fill in: column.
+  Optional: limit.
+
+- sample: A random sample of rows -- for "give me a feel for the data"
+  style questions where the user doesn't want any particular ranking.
+  Fill in: limit (how many rows -- defaults to 10 if unspecified).
+
+Note: there's no separate "sort" operation. For "sort by X" or "rank by
+X" questions without a specific top-N in mind, use top_n with a
+reasonable limit (e.g. 20) and set sort_column accordingly.
 """
 
 CHART_GUIDE = """
 Chart types: bar, line, pie, scatter, histogram, stat, table, none.
-For groupby_agg results, "bar" is usually the right choice unless the
-group_by column is a date/time (use "line") or there are very few
+For groupby_agg and distribution results, "bar" is usually the right choice
+unless the grouped column is a date/time (use "line") or there are very few
 categories being compared as parts of a whole (use "pie").
+For top_n, filter, distinct, and sample results, use "table" -- individual
+rows with multiple columns don't fit a bar/line/pie shape.
+For describe, use "table" as well.
 """
 
 
@@ -59,10 +105,10 @@ Dataset ({row_count} rows):
 User question: "{user_question}"
 
 Rules:
-- group_by and metric MUST be exact column names from the dataset above —
-  never invent a column name that isn't listed.
+- group_by, metric, sort_column, and column MUST be exact column names
+  from the dataset above — never invent a column name that isn't listed.
 - If the question is ambiguous (e.g. it's unclear which column is the
-  metric, or the question doesn't match the available operation at all),
+  metric, or the question doesn't match any available operation at all),
   set clarification_needed to a short question you'd ask the user instead
   of guessing.
 - confidence should reflect how sure you are that this operation and these
