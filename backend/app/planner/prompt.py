@@ -5,6 +5,8 @@
 # in schemas.py's OPERATION_PARAM_MODELS -- those two lists must be kept
 # in sync as new operations get built.
 
+from datetime import date
+
 OPERATIONS_GUIDE = """
 Available operations:
 
@@ -54,6 +56,23 @@ Available operations:
   style questions where the user doesn't want any particular ranking.
   Fill in: limit (how many rows -- defaults to 10 if unspecified).
 
+- trend: Groups a date column into periods (day/week/month/quarter/year)
+  and counts rows or aggregates a metric per period, in chronological
+  order. Use this for questions like "how has X changed over time",
+  "monthly hiring trend", "sales by quarter", "yearly breakdown".
+  Fill in: date_column (the date/datetime column), granularity (day,
+  week, month, quarter, or year -- pick whichever matches the question's
+  timeframe; default to "month" if unspecified).
+  Optional: metric (column to aggregate per period -- leave unset to just
+  count rows per period), aggregation (mean, sum, count, median, min,
+  max, std -- defaults to count).
+
+- date_range_filter: Shows rows within a date range on a date column.
+  Use this for questions like "employees hired before 2020", "records
+  from last year", "what happened between March and June".
+  Fill in: date_column.
+  Optional: start_date, end_date (see date rules below), limit.
+
 Note: there's no separate "sort" operation. For "sort by X" or "rank by
 X" questions without a specific top-N in mind, use top_n with a
 reasonable limit (e.g. 20) and set sort_column accordingly.
@@ -64,9 +83,12 @@ Chart types: bar, line, pie, scatter, histogram, stat, table, none.
 For groupby_agg and distribution results, "bar" is usually the right choice
 unless the grouped column is a date/time (use "line") or there are very few
 categories being compared as parts of a whole (use "pie").
-For top_n, filter, distinct, and sample results, use "table" -- individual
-rows with multiple columns don't fit a bar/line/pie shape.
+For top_n, filter, distinct, sample, and date_range_filter results, use
+"table" -- individual rows with multiple columns don't fit a bar/line/pie
+shape.
 For describe, use "table" as well.
+For trend results, always use "line" -- it's a chronological series, and
+a line is the only chart type that shows change over time clearly.
 """
 
 
@@ -88,12 +110,15 @@ def build_planner_prompt(user_question: str, dataset_profile: dict) -> str:
         for col in dataset_profile.get("columns", [])
     )
     row_count = dataset_profile.get("row_count", "unknown")
+    today = date.today().isoformat()
 
     return f"""You are a data analysis planner. Your job is to read the user's
 question and the dataset's columns, then decide exactly ONE operation to run
 against the data. You do NOT perform any analysis yourself — you only choose
 the operation and its parameters. Deterministic Python code will do the
 actual computation.
+
+Today's date is {today}.
 
 {OPERATIONS_GUIDE}
 
@@ -105,8 +130,14 @@ Dataset ({row_count} rows):
 User question: "{user_question}"
 
 Rules:
-- group_by, metric, sort_column, and column MUST be exact column names
-  from the dataset above — never invent a column name that isn't listed.
+- group_by, metric, sort_column, column, filter_column, and date_column
+  MUST be exact column names from the dataset above — never invent a
+  column name that isn't listed.
+- For date_range_filter and trend, translate relative time language into
+  absolute dates using today's date above -- e.g. "last year" means
+  start_date one year before today; "since March" means start_date of
+  March 1st of the current year (or last year if that's already passed).
+  start_date/end_date must be in "YYYY-MM-DD" format.
 - If the question is ambiguous (e.g. it's unclear which column is the
   metric, or the question doesn't match any available operation at all),
   set clarification_needed to a short question you'd ask the user instead

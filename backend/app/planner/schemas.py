@@ -39,6 +39,7 @@ class Operation(str, Enum):
     FILTER = "filter"
     DISTINCT = "distinct"
     SAMPLE = "sample"
+    DATE_RANGE_FILTER = "date_range_filter"
 
 
 class ChartType(str, Enum):
@@ -106,6 +107,32 @@ class SampleParams(BaseModel):
     n: int = 10
 
 
+class TrendParams(BaseModel):
+    """
+    Groups a date column into periods (day/week/month/quarter/year) and
+    aggregates a metric per period -- or just counts rows per period if
+    no metric is given. Covers "trend over time", "monthly breakdown",
+    "how has X changed over time" style questions in one operation.
+    """
+    date_column: str
+    granularity: Literal["day", "week", "month", "quarter", "year"] = "month"
+    metric: Optional[str] = None  # None = count rows per period
+    aggregation: Literal["mean", "sum", "count", "median", "min", "max", "std"] = "count"
+
+
+class DateRangeFilterParams(BaseModel):
+    """
+    Filters rows to a date range on a date column. start_date/end_date
+    are expected as ISO 'YYYY-MM-DD' strings -- the planner is responsible
+    for translating relative language ("last year", "since March") into
+    absolute dates, since it's told today's date in the prompt.
+    """
+    date_column: str
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    limit: Optional[int] = None
+
+
 # Maps each Operation to the param model that validates it.
 OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.GROUPBY_AGG: GroupByAggParams,
@@ -115,6 +142,8 @@ OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.FILTER: FilterParams,
     Operation.DISTINCT: DistinctParams,
     Operation.SAMPLE: SampleParams,
+    Operation.TREND: TrendParams,
+    Operation.DATE_RANGE_FILTER: DateRangeFilterParams,
 }
 
 
@@ -170,6 +199,21 @@ class AnalysisPlan(BaseModel):
     filter_value: Optional[str] = Field(
         default=None, description="Value to compare against (as text -- numbers are "
         "coerced automatically if the column is numeric)"
+    )
+
+    # trend / date_range_filter fields
+    date_column: Optional[str] = Field(
+        default=None, description="Date/datetime column to use for trend or date filtering"
+    )
+    granularity: Optional[Literal["day", "week", "month", "quarter", "year"]] = Field(
+        default=None, description="Time period to group by for trend, e.g. 'month'"
+    )
+    start_date: Optional[str] = Field(
+        default=None, description="Start of a date range, as 'YYYY-MM-DD'. Translate relative "
+        "phrases like 'last year' into an absolute date using today's date given below."
+    )
+    end_date: Optional[str] = Field(
+        default=None, description="End of a date range, as 'YYYY-MM-DD'. Same rule as start_date."
     )
 
     chart: ChartType
@@ -233,6 +277,20 @@ class AnalysisPlan(BaseModel):
         elif self.operation == Operation.SAMPLE:
             raw = {
                 "n": self.limit if self.limit is not None else 10,
+            }
+        elif self.operation == Operation.TREND:
+            raw = {
+                "date_column": self.date_column,
+                "granularity": self.granularity or "month",
+                "metric": self.metric,
+                "aggregation": self.aggregation or "count",
+            }
+        elif self.operation == Operation.DATE_RANGE_FILTER:
+            raw = {
+                "date_column": self.date_column,
+                "start_date": self.start_date,
+                "end_date": self.end_date,
+                "limit": self.limit,
             }
         else:
             # New operations need their own field-gathering branch here,

@@ -17,7 +17,7 @@ from typing import Any
 from app.planner.schemas import Operation, AnalysisPlan
 from app.analysis.operations import (
     groupby_agg, top_n_rows, describe_dataset, distribution,
-    filter_rows, distinct_values, sample_rows,
+    filter_rows, distinct_values, sample_rows, trend, date_range_filter,
 )
 
 
@@ -46,6 +46,8 @@ OPERATION_REGISTRY = {
     Operation.FILTER: filter_rows,
     Operation.DISTINCT: distinct_values,
     Operation.SAMPLE: sample_rows,
+    Operation.TREND: trend,
+    Operation.DATE_RANGE_FILTER: date_range_filter,
 }
 
 

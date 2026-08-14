@@ -213,3 +213,90 @@ def sample_rows(df: pd.DataFrame, n: int = 10) -> pd.DataFrame:
     if n <= 0:
         return df.head(0)
     return df.sample(n=n).reset_index(drop=True)
+
+
+_TREND_FREQ_MAP = {"day": "D", "week": "W", "month": "M", "quarter": "Q", "year": "Y"}
+
+
+def trend(
+    df: pd.DataFrame,
+    date_column: str,
+    granularity: Literal["day", "week", "month", "quarter", "year"] = "month",
+    metric: str | None = None,
+    aggregation: Literal["mean", "sum", "count", "median", "min", "max", "std"] = "count",
+) -> pd.DataFrame:
+    """
+    Groups rows into time periods (day/week/month/quarter/year) and
+    aggregates a metric per period -- or counts rows per period if no
+    metric is given. Result is always sorted chronologically, so it's
+    ready to chart as a line without any extra sorting downstream.
+
+    Example: trend(df, "hire_date", granularity="year") -> hires per year
+    Example: trend(df, "sale_date", granularity="month", metric="revenue",
+                    aggregation="sum") -> monthly revenue totals
+    """
+    if date_column not in df.columns:
+        raise ValueError(f"Column '{date_column}' not found in dataset")
+    if metric is not None and metric not in df.columns:
+        raise ValueError(f"Column '{metric}' not found in dataset")
+
+    parsed_dates = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+    if parsed_dates.notna().sum() == 0:
+        raise ValueError(f"Column '{date_column}' doesn't contain any recognizable dates")
+
+    freq = _TREND_FREQ_MAP.get(granularity)
+    if freq is None:
+        raise ValueError(f"Unsupported granularity '{granularity}'")
+
+    working = df.copy()
+    working["_period"] = parsed_dates.dt.to_period(freq)
+    working = working.dropna(subset=["_period"])
+
+    if metric is None:
+        result = working.groupby("_period", observed=True).size().reset_index(name="count")
+    else:
+        result = working.groupby("_period", observed=True)[metric].agg(aggregation).reset_index()
+
+    result = result.sort_values("_period")
+    result["_period"] = result["_period"].astype(str)
+    result = result.rename(columns={"_period": date_column})
+    return result.reset_index(drop=True)
+
+
+def date_range_filter(
+    df: pd.DataFrame,
+    date_column: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int | None = None,
+) -> pd.DataFrame:
+    """
+    Filters rows to those within [start_date, end_date] on date_column.
+    Either bound can be omitted for an open-ended range. Dates are parsed
+    properly (not compared as raw strings), so this works regardless of
+    the column's original date format.
+    """
+    if date_column not in df.columns:
+        raise ValueError(f"Column '{date_column}' not found in dataset")
+
+    parsed_dates = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
+    if parsed_dates.notna().sum() == 0:
+        raise ValueError(f"Column '{date_column}' doesn't contain any recognizable dates")
+
+    mask = parsed_dates.notna()
+
+    if start_date:
+        start = pd.to_datetime(start_date, errors="coerce")
+        if pd.isna(start):
+            raise ValueError(f"'{start_date}' isn't a recognizable date")
+        mask &= parsed_dates >= start
+
+    if end_date:
+        end = pd.to_datetime(end_date, errors="coerce")
+        if pd.isna(end):
+            raise ValueError(f"'{end_date}' isn't a recognizable date")
+        mask &= parsed_dates <= end
+
+    result = df[mask]
+    row_cap = min(limit, MAX_SAFETY_ROWS) if limit is not None else MAX_SAFETY_ROWS
+    return result.head(row_cap).reset_index(drop=True)
