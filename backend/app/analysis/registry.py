@@ -18,6 +18,7 @@ from app.planner.schemas import Operation, AnalysisPlan
 from app.analysis.operations import (
     groupby_agg, top_n_rows, describe_dataset, distribution,
     filter_rows, distinct_values, sample_rows, trend, date_range_filter,
+    correlation, outlier_detection, duplicate_rows,
 )
 
 
@@ -48,6 +49,9 @@ OPERATION_REGISTRY = {
     Operation.SAMPLE: sample_rows,
     Operation.TREND: trend,
     Operation.DATE_RANGE_FILTER: date_range_filter,
+    Operation.CORRELATION: correlation,
+    Operation.OUTLIER_DETECTION: outlier_detection,
+    Operation.DUPLICATE_ROWS: duplicate_rows,
 }
 
 

@@ -73,6 +73,37 @@ Available operations:
   Fill in: date_column.
   Optional: start_date, end_date (see date rules below), limit.
 
+- correlation: Measures how strongly two numeric columns move together
+  (Pearson correlation, from -1 to 1), or shows a full correlation
+  matrix across all numeric columns at once.
+  Use for questions like "is there a correlation between salary and
+  tenure", "how are these numbers related", "correlation matrix".
+  For a specific pair: fill in column_a AND column_b (both required together).
+  For a full matrix ("how do all the numbers relate"): leave both unset.
+  Never set only one of column_a/column_b.
+  IMPORTANT: column_a and column_b MUST both be numeric columns (check the
+  dtype shown in the dataset listing below). If the user's intended
+  concept doesn't map to an actual numeric column in this dataset (e.g.
+  they say "tenure" but there's only a date column, not a computed
+  tenure/years-of-service number), do NOT pick a non-numeric column --
+  set clarification_needed instead, explaining that concept isn't
+  available as a numeric column, and suggest what numeric columns exist.
+
+- outlier_detection: Finds rows with unusually high or low values in one
+  numeric column (using the IQR statistical method).
+  Use for questions like "are there any salary outliers", "find unusual
+  values in X", "who has an abnormally high Y".
+  Fill in: column (must be numeric -- check the dtype below; if the
+  user's intended column isn't numeric, use clarification_needed instead
+  of picking it anyway).
+  Optional: limit.
+
+- duplicate_rows: Shows exact duplicate rows in the currently loaded data.
+  Use for questions like "are there duplicate rows", "do I have repeated
+  entries". Note: this checks the data as currently loaded, which may
+  already be cleaned.
+  Optional: limit.
+
 Note: there's no separate "sort" operation. For "sort by X" or "rank by
 X" questions without a specific top-N in mind, use top_n with a
 reasonable limit (e.g. 20) and set sort_column accordingly.
@@ -83,12 +114,14 @@ Chart types: bar, line, pie, scatter, histogram, stat, table, none.
 For groupby_agg and distribution results, "bar" is usually the right choice
 unless the grouped column is a date/time (use "line") or there are very few
 categories being compared as parts of a whole (use "pie").
-For top_n, filter, distinct, sample, and date_range_filter results, use
-"table" -- individual rows with multiple columns don't fit a bar/line/pie
-shape.
+For top_n, filter, distinct, sample, date_range_filter, outlier_detection,
+and duplicate_rows results, use "table" -- individual rows with multiple
+columns don't fit a bar/line/pie shape.
 For describe, use "table" as well.
 For trend results, always use "line" -- it's a chronological series, and
 a line is the only chart type that shows change over time clearly.
+For correlation: use "stat" for a pairwise correlation (a single number),
+or "table" for a full matrix.
 """
 
 

@@ -300,3 +300,94 @@ def date_range_filter(
     result = df[mask]
     row_cap = min(limit, MAX_SAFETY_ROWS) if limit is not None else MAX_SAFETY_ROWS
     return result.head(row_cap).reset_index(drop=True)
+
+
+def correlation(
+    df: pd.DataFrame,
+    column_a: str | None = None,
+    column_b: str | None = None,
+) -> pd.DataFrame:
+    """
+    Two modes:
+    - column_a AND column_b given -> single pairwise Pearson correlation,
+      returned as a 1x1 dataframe (renders as a stat card).
+    - neither given -> full correlation matrix across every numeric column.
+    - only one given -> invalid, raises (the planner should ask for
+      clarification rather than send a half-filled request).
+    """
+    numeric_df = df.select_dtypes(include="number")
+
+    if column_a and column_b:
+        for col in (column_a, column_b):
+            if col not in df.columns:
+                raise ValueError(f"Column '{col}' not found in dataset")
+            if col not in numeric_df.columns:
+                raise ValueError(f"Column '{col}' isn't numeric, can't compute correlation")
+        corr_value = df[column_a].corr(df[column_b])
+        label = f"{column_a} vs {column_b} correlation"
+        return pd.DataFrame({label: [corr_value]})
+
+    if column_a or column_b:
+        raise ValueError(
+            "Provide both column_a and column_b for a pairwise correlation, "
+            "or neither for a full correlation matrix"
+        )
+
+    if numeric_df.shape[1] < 2:
+        raise ValueError("Not enough numeric columns in this dataset to compute correlation")
+
+    matrix = numeric_df.corr().reset_index().rename(columns={"index": "column"})
+    return matrix
+
+
+def outlier_detection(
+    df: pd.DataFrame,
+    column: str,
+    limit: int | None = None,
+) -> pd.DataFrame:
+    """
+    Flags statistical outliers in one numeric column using the IQR method
+    (values more than 1.5x the interquartile range below Q1 or above Q3
+    -- a standard, deterministic, no-training-required outlier rule).
+    Returns the actual outlier rows, not just a count.
+    """
+    if column not in df.columns:
+        raise ValueError(f"Column '{column}' not found in dataset")
+    if not pd.api.types.is_numeric_dtype(df[column]):
+        raise ValueError(f"Column '{column}' isn't numeric, can't detect outliers")
+
+    values = df[column].dropna()
+    if len(values) < 4:
+        raise ValueError(f"Not enough data in '{column}' to detect outliers")
+
+    q1 = values.quantile(0.25)
+    q3 = values.quantile(0.75)
+    iqr = q3 - q1
+
+    if iqr == 0:
+        # No spread outside the middle 50% -- nothing is a meaningful
+        # outlier by this method. Returning everything as "outlying"
+        # would be misleading, so return an empty result instead.
+        return df.head(0)
+
+    lower_bound = q1 - 1.5 * iqr
+    upper_bound = q3 + 1.5 * iqr
+    mask = (df[column] < lower_bound) | (df[column] > upper_bound)
+
+    result = df[mask]
+    row_cap = min(limit, MAX_SAFETY_ROWS) if limit is not None else MAX_SAFETY_ROWS
+    return result.head(row_cap).reset_index(drop=True)
+
+
+def duplicate_rows(df: pd.DataFrame, limit: int | None = None) -> pd.DataFrame:
+    """
+    Returns every row that's an exact duplicate of another row in the
+    CURRENTLY LOADED data -- distinct from cleaning's upload-time report,
+    since this checks whatever's loaded right now (possibly already
+    cleaned, if the user chose to clean on confirm).
+    """
+    dupe_mask = df.duplicated(keep=False)  # flag every occurrence, not just the "extra" ones
+    result = df[dupe_mask].sort_values(by=list(df.columns))
+
+    row_cap = min(limit, MAX_SAFETY_ROWS) if limit is not None else MAX_SAFETY_ROWS
+    return result.head(row_cap).reset_index(drop=True)

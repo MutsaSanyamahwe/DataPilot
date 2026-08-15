@@ -40,6 +40,7 @@ class Operation(str, Enum):
     DISTINCT = "distinct"
     SAMPLE = "sample"
     DATE_RANGE_FILTER = "date_range_filter"
+    DUPLICATE_ROWS = "duplicate_rows"
 
 
 class ChartType(str, Enum):
@@ -133,6 +134,32 @@ class DateRangeFilterParams(BaseModel):
     limit: Optional[int] = None
 
 
+class CorrelationParams(BaseModel):
+    """
+    Two modes: give both column_a and column_b for a single pairwise
+    correlation coefficient, or leave both unset for a full correlation
+    matrix across every numeric column. Giving only one is invalid --
+    the planner should ask for clarification instead.
+    """
+    column_a: Optional[str] = None
+    column_b: Optional[str] = None
+
+
+class OutlierDetectionParams(BaseModel):
+    """Flags statistical outliers in one numeric column using the IQR method."""
+    column: str
+    limit: Optional[int] = None
+
+
+class DuplicateRowsParams(BaseModel):
+    """
+    Shows the actual duplicate rows in the currently loaded data (not the
+    upload-time cleaning report -- this checks whatever's loaded right now,
+    which may already be cleaned).
+    """
+    limit: Optional[int] = None
+
+
 # Maps each Operation to the param model that validates it.
 OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.GROUPBY_AGG: GroupByAggParams,
@@ -144,6 +171,9 @@ OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.SAMPLE: SampleParams,
     Operation.TREND: TrendParams,
     Operation.DATE_RANGE_FILTER: DateRangeFilterParams,
+    Operation.CORRELATION: CorrelationParams,
+    Operation.OUTLIER_DETECTION: OutlierDetectionParams,
+    Operation.DUPLICATE_ROWS: DuplicateRowsParams,
 }
 
 
@@ -215,6 +245,10 @@ class AnalysisPlan(BaseModel):
     end_date: Optional[str] = Field(
         default=None, description="End of a date range, as 'YYYY-MM-DD'. Same rule as start_date."
     )
+
+    # correlation fields
+    column_a: Optional[str] = Field(default=None, description="First column for a pairwise correlation")
+    column_b: Optional[str] = Field(default=None, description="Second column for a pairwise correlation")
 
     chart: ChartType
     explanation_intent: str = Field(
@@ -290,6 +324,20 @@ class AnalysisPlan(BaseModel):
                 "date_column": self.date_column,
                 "start_date": self.start_date,
                 "end_date": self.end_date,
+                "limit": self.limit,
+            }
+        elif self.operation == Operation.CORRELATION:
+            raw = {
+                "column_a": self.column_a,
+                "column_b": self.column_b,
+            }
+        elif self.operation == Operation.OUTLIER_DETECTION:
+            raw = {
+                "column": self.column,
+                "limit": self.limit,
+            }
+        elif self.operation == Operation.DUPLICATE_ROWS:
+            raw = {
                 "limit": self.limit,
             }
         else:
