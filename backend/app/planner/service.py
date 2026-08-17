@@ -34,7 +34,11 @@ class InvalidPlanError(Exception):
 _client = genai.Client(api_key=settings.google_api_key)
 
 
-def get_validated_plan(user_question: str, dataset_profile: dict) -> tuple[AnalysisPlan, object]:
+def get_validated_plan(
+    user_question: str,
+    dataset_profile: dict,
+    conversation_history: list[dict] | None = None,
+) -> tuple[AnalysisPlan, object]:
     """
     Calls Gemini to produce an AnalysisPlan, then validates it.
     Returns (plan, validated_params) on success.
@@ -42,8 +46,12 @@ def get_validated_plan(user_question: str, dataset_profile: dict) -> tuple[Analy
     or LLMRateLimitError / LLMServiceError on a Gemini API failure --
     shared exception types with explainer/service.py so api/ask.py can
     handle both LLM calls with one except block.
+
+    conversation_history is optional recent-turn context (see
+    planner/prompt.py) used to resolve follow-ups, pronouns, and answers
+    to a clarifying question the assistant just asked.
     """
-    plan = _call_planner_llm(user_question, dataset_profile)
+    plan = _call_planner_llm(user_question, dataset_profile, conversation_history)
 
     if plan.operation not in OPERATION_PARAM_MODELS:
         raise UnsupportedOperationError(plan.operation.value)
@@ -56,8 +64,12 @@ def get_validated_plan(user_question: str, dataset_profile: dict) -> tuple[Analy
     return plan, validated_params
 
 
-def _call_planner_llm(user_question: str, dataset_profile: dict) -> AnalysisPlan:
-    prompt = build_planner_prompt(user_question, dataset_profile)
+def _call_planner_llm(
+    user_question: str,
+    dataset_profile: dict,
+    conversation_history: list[dict] | None = None,
+) -> AnalysisPlan:
+    prompt = build_planner_prompt(user_question, dataset_profile, conversation_history)
 
     try:
         response = _client.models.generate_content(

@@ -35,7 +35,7 @@ export function Chart({ spec }) {
 
 function ChartCard({ title, children, onDownloadSVG }) {
     return (
-        <div className="mt-3 rounded-xl surface p-4">
+        <div className="mt-3 p-4">
             <div className="mb-3 flex items-center justify-between">
                 <p className="font-mono text-xs uppercase tracking-wider" style={{ color: 'var(--muted)' }}>{title}</p>
                 {onDownloadSVG && (

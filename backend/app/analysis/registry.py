@@ -18,7 +18,7 @@ from app.planner.schemas import Operation, AnalysisPlan
 from app.analysis.operations import (
     groupby_agg, top_n_rows, describe_dataset, distribution,
     filter_rows, distinct_values, sample_rows, trend, date_range_filter,
-    correlation, outlier_detection, duplicate_rows,
+    correlation, outlier_detection, duplicate_rows, compare_groups, pivot,
 )
 
 
@@ -52,7 +52,32 @@ OPERATION_REGISTRY = {
     Operation.CORRELATION: correlation,
     Operation.OUTLIER_DETECTION: outlier_detection,
     Operation.DUPLICATE_ROWS: duplicate_rows,
+    Operation.COMPARISON: compare_groups,
+    Operation.PIVOT: pivot,
 }
+
+# Fail loudly at import time, not at runtime, if a future Operation enum
+# member gets added here without also being registered in
+# planner.schemas.OPERATION_PARAM_MODELS (or vice versa). Without this,
+# an orphaned enum member is silently selectable by Gemini (it's a real
+# schema member) but has nowhere to actually run -- exactly what
+# happened with the old unused FILTER_AGG value, which produced a
+# confusing generic error for the user instead of failing at dev time.
+from app.planner.schemas import OPERATION_PARAM_MODELS as _OPERATION_PARAM_MODELS
+
+_all_ops = set(Operation)
+_registered_here = set(OPERATION_REGISTRY.keys())
+_registered_in_planner = set(_OPERATION_PARAM_MODELS.keys())
+
+if _all_ops != _registered_here or _all_ops != _registered_in_planner:
+    _missing_from_registry = _all_ops - _registered_here
+    _missing_from_planner = _all_ops - _registered_in_planner
+    raise RuntimeError(
+        "Operation enum is out of sync with its registries. "
+        f"Missing from analysis.registry.OPERATION_REGISTRY: {_missing_from_registry or 'none'}. "
+        f"Missing from planner.schemas.OPERATION_PARAM_MODELS: {_missing_from_planner or 'none'}. "
+        "Every Operation enum member needs both a param model and a registry entry."
+    )
 
 
 def run_plan(plan: AnalysisPlan, validated_params: Any, df: pd.DataFrame) -> AnalysisResult:

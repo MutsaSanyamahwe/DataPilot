@@ -31,7 +31,6 @@ class Operation(str, Enum):
     DESCRIBE = "describe"
     CORRELATION = "correlation"
     TREND = "trend"
-    FILTER_AGG = "filter_agg"
     DISTRIBUTION = "distribution"
     COMPARISON = "comparison"
     OUTLIER_DETECTION = "outlier_detection"
@@ -41,6 +40,7 @@ class Operation(str, Enum):
     SAMPLE = "sample"
     DATE_RANGE_FILTER = "date_range_filter"
     DUPLICATE_ROWS = "duplicate_rows"
+    PIVOT = "pivot"
 
 
 class ChartType(str, Enum):
@@ -160,6 +160,35 @@ class DuplicateRowsParams(BaseModel):
     limit: Optional[int] = None
 
 
+class ComparisonParams(BaseModel):
+    """
+    Compares one metric between exactly two specific values of a
+    categorical column, computing both the absolute and percentage
+    difference deterministically (so the explainer reads the numbers
+    rather than computing the difference itself).
+
+    metric is optional -- leave it unset for "headcount"/"how many"
+    style comparisons (row counts), same pattern as trend/pivot.
+    """
+    group_column: str
+    group_a: str
+    group_b: str
+    metric: Optional[str] = None
+    aggregation: Literal["mean", "sum", "count", "median", "min", "max"] = "mean"
+
+
+class PivotParams(BaseModel):
+    """
+    Cross-tabulates two categorical columns. If metric is given, cells
+    show the aggregated metric (a true pivot table); if metric is left
+    unset, cells show row counts (a crosstab / frequency table).
+    """
+    row_column: str
+    col_column: str
+    metric: Optional[str] = None
+    aggregation: Literal["mean", "sum", "count", "median", "min", "max"] = "count"
+
+
 # Maps each Operation to the param model that validates it.
 OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.GROUPBY_AGG: GroupByAggParams,
@@ -174,6 +203,8 @@ OPERATION_PARAM_MODELS: dict[Operation, type[BaseModel]] = {
     Operation.CORRELATION: CorrelationParams,
     Operation.OUTLIER_DETECTION: OutlierDetectionParams,
     Operation.DUPLICATE_ROWS: DuplicateRowsParams,
+    Operation.COMPARISON: ComparisonParams,
+    Operation.PIVOT: PivotParams,
 }
 
 
@@ -249,6 +280,15 @@ class AnalysisPlan(BaseModel):
     # correlation fields
     column_a: Optional[str] = Field(default=None, description="First column for a pairwise correlation")
     column_b: Optional[str] = Field(default=None, description="Second column for a pairwise correlation")
+
+    # comparison fields
+    group_column: Optional[str] = Field(default=None, description="Categorical column whose two values are being compared")
+    group_a: Optional[str] = Field(default=None, description="First group value to compare, e.g. 'Engineering'")
+    group_b: Optional[str] = Field(default=None, description="Second group value to compare, e.g. 'Sales'")
+
+    # pivot fields
+    row_column: Optional[str] = Field(default=None, description="Categorical column to use as pivot rows")
+    col_column: Optional[str] = Field(default=None, description="Categorical column to use as pivot columns")
 
     chart: ChartType
     explanation_intent: str = Field(
@@ -339,6 +379,21 @@ class AnalysisPlan(BaseModel):
         elif self.operation == Operation.DUPLICATE_ROWS:
             raw = {
                 "limit": self.limit,
+            }
+        elif self.operation == Operation.COMPARISON:
+            raw = {
+                "group_column": self.group_column,
+                "group_a": self.group_a,
+                "group_b": self.group_b,
+                "metric": self.metric,
+                "aggregation": self.aggregation if self.aggregation in ("mean", "sum", "count", "median", "min", "max") else "mean",
+            }
+        elif self.operation == Operation.PIVOT:
+            raw = {
+                "row_column": self.row_column,
+                "col_column": self.col_column,
+                "metric": self.metric,
+                "aggregation": self.aggregation if self.aggregation in ("mean", "sum", "count", "median", "min", "max") else "count",
             }
         else:
             # New operations need their own field-gathering branch here,

@@ -15,6 +15,7 @@
 # named tables, selecting more than one sheet/file is rejected with a
 # clear error rather than silently combining or dropping data.
 
+import logging
 import shutil
 import uuid
 from pathlib import Path
@@ -28,6 +29,8 @@ from app.config import settings
 from app.validation.validator import validate_dataset, ValidationError
 from app.cleaning.cleaner import inspect_cleaning, apply_cleaning
 from app.sessions.store import save_session_df
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -127,9 +130,41 @@ def _load_selected_dataframe(session_id: str, selections: List[SheetSelection]) 
 
     file_path, sheet_name = to_load[0]
     extension = file_path.suffix.lower()
-    if extension == ".csv":
-        return pd.read_csv(file_path)
-    return pd.read_excel(file_path, sheet_name=sheet_name)
+    try:
+        if extension == ".csv":
+            return pd.read_csv(file_path)
+        return pd.read_excel(file_path, sheet_name=sheet_name)
+    except pd.errors.EmptyDataError:
+        raise HTTPException(
+            status_code=400,
+            detail="This file appears to be empty. Please check the file and try again.",
+        )
+    except pd.errors.ParserError as e:
+        logger.warning("CSV parse error for %s: %s", file_path.name, e)
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read this file -- it may be corrupted or not a valid CSV. "
+                   "Please check the file and try again.",
+        )
+    except ValueError as e:
+        # Common for Excel: a selected sheet no longer exists, or has no
+        # readable data (e.g. every row/column is genuinely blank).
+        logger.warning("Excel read error for %s (sheet=%s): %s", file_path.name, sheet_name, e)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read the '{sheet_name}' sheet -- it may be empty or in an unexpected format. "
+                   f"Please check the file and try again." if sheet_name else
+                   "Could not read this file. Please check it and try again.",
+        )
+    except Exception as e:
+        # Catch-all: never let a raw file-parsing exception crash the
+        # request uncaught. Log the real detail for debugging, return a
+        # generic but honest message to the user.
+        logger.warning("Unexpected error reading %s: %s", file_path.name, e)
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read this file. Please check that it's a valid CSV or Excel file and try again.",
+        )
 
 
 def _display_name_for_selection(selections: List[SheetSelection]) -> str:

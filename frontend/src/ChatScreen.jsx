@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { Send, Download, Loader2, RotateCcw, Table2, Sparkles, Database, ArrowUpRight } from 'lucide-react';
+import { Send, Download, Loader2, RotateCcw, Table2, Sparkles, Database, ArrowUpRight, ChevronDown } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 import { Chart } from './Chart';
@@ -19,7 +19,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [reportMenuOpen, setReportMenuOpen] = useState(false);
-    const [activeTable, setActiveTable] = useState(null); // table_name of the open popover, or null
+    const [activeTable, setActiveTable] = useState(null); // table_name of the open dropdown, or null
     const scrollRef = useRef(null);
 
     useEffect(() => {
@@ -37,6 +37,17 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
         const q = question.trim();
         if (!q || loading) return;
 
+        // Build history from the current messages BEFORE this new question
+        // is added -- `messages` here still reflects state from before the
+        // setMessages call below applies (React state updates aren't
+        // synchronous), so this naturally captures "everything said so far."
+        // Capped and shaped to match AskRequest.history on the backend
+        // (planner/prompt.py caps further to the last 3 exchanges).
+        const history = messages
+            .filter((m) => !m.error) // don't feed failed responses back in as context
+            .slice(-6)
+            .map((m) => ({ role: m.role, text: m.text }));
+
         const userMsg = { id: crypto.randomUUID(), role: 'user', text: q };
         setMessages((prev) => [...prev, userMsg]);
         setInput('');
@@ -46,7 +57,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
             const res = await fetch(`${API_BASE}/ask`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ session_id: sessionId, question: q }),
+                body: JSON.stringify({ session_id: sessionId, question: q, history }),
             });
             if (!res.ok) {
                 const body = await res.json().catch(() => null);
@@ -92,6 +103,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
     };
 
     const hasMessages = messages.length > 0;
+    const openTable = activeTable ? tables.find((t) => t.table_name === activeTable) : null;
 
     return (
         <div className="flex h-screen flex-col">
@@ -141,19 +153,22 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                 </div>
             </nav>
 
-            {/* Tables context bar -- click a table pill to see its column names */}
-            <div className="relative flex shrink-0 items-center gap-2 overflow-x-auto px-6 py-2 scroll-thin" style={{ borderBottom: '1px solid var(--border)' }}>
-                <span className="font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
-                    Loaded:
-                </span>
-                {tables.map((t) => (
-                    <div key={t.table_name} className="relative">
+            {/* Tables context bar -- click a table pill to open the columns dropdown below the bar */}
+            <div className="relative z-40 shrink-0" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div className="flex items-center gap-2 overflow-x-auto px-6 py-2 scroll-thin">
+                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wider" style={{ color: 'var(--muted)' }}>
+                        Loaded:
+                    </span>
+                    {tables.map((t) => (
                         <button
+                            key={t.table_name}
                             onClick={(e) => {
                                 e.stopPropagation();
                                 setActiveTable((prev) => (prev === t.table_name ? null : t.table_name));
                             }}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs transition-colors"
+                            aria-expanded={activeTable === t.table_name}
+                            aria-label={`Show columns for ${t.table_name}`}
+                            className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 font-mono text-xs transition-colors"
                             style={{
                                 background: 'var(--surface)',
                                 border: `1px solid ${activeTable === t.table_name ? 'var(--amber)' : 'var(--border)'}`,
@@ -162,32 +177,48 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                             <Table2 size={11} style={{ color: 'var(--teal)' }} />
                             {t.table_name}
                             <span style={{ color: 'var(--muted)' }}>· {t.rows.toLocaleString()}</span>
+                            <ChevronDown
+                                size={11}
+                                style={{
+                                    color: 'var(--muted)',
+                                    transition: 'transform 150ms ease',
+                                    transform: activeTable === t.table_name ? 'rotate(180deg)' : 'none',
+                                }}
+                            />
                         </button>
+                    ))}
+                </div>
 
-                        {activeTable === t.table_name && (
-                            <div
-                                className="absolute left-0 top-full mt-1.5 rounded-lg surface p-3 z-30 animate-fade-in"
-                                style={{ minWidth: '220px', maxWidth: '280px' }}
-                            >
-                                <p className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--muted)' }}>
-                                    Columns
-                                </p>
-                                <div className="flex flex-wrap gap-1.5">
-                                    {t.columns.map((col) => (
-                                        <span
-                                            key={col}
-                                            className="font-mono text-xs px-1.5 py-0.5 rounded"
-                                            style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
-                                        >
-                                            {col}
-                                        </span>
-                                    ))}
-                                </div>
+                {/* Dropdown panel: rendered outside the horizontally scrolling row so it is
+                    never clipped, and stacked above the chat area instead of under the header */}
+                {openTable && (
+                    <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="absolute left-0 right-0 top-full z-40 px-6 animate-fade-in"
+                    >
+                        <div
+                            className="rounded-lg surface p-3 overflow-y-auto scroll-thin"
+                            style={{ maxHeight: '40vh', boxShadow: '0 8px 24px rgba(0,0,0,0.18)' }}
+                        >
+                            <p className="font-mono text-[10px] uppercase tracking-wider mb-2" style={{ color: 'var(--muted)' }}>
+                                {openTable.table_name} · Columns ({openTable.columns.length})
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {openTable.columns.map((col) => (
+                                    <span
+                                        key={col}
+                                        className="font-mono text-xs px-1.5 py-0.5 rounded"
+                                        style={{ background: 'var(--bg)', border: '1px solid var(--border)' }}
+                                    >
+                                        {col}
+                                    </span>
+                                ))}
                             </div>
-                        )}
+                        </div>
                     </div>
-                ))}
+                )}
             </div>
+
             {/* Chat area */}
             <div ref={scrollRef} className="flex-1 overflow-y-auto scroll-thin px-6 py-6">
                 <div className="mx-auto max-w-3xl">
@@ -198,7 +229,7 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
                             </div>
                             <h2 className="font-display text-2xl font-bold">Ask anything about your data</h2>
                             <p className="mt-2 max-w-md font-body text-sm" style={{ color: 'var(--muted)' }}>
-                                I'll figure out the right analysis, run it directly against your data, and explain what I find — with charts when useful.
+                                I&apos;ll figure out the right analysis, run it directly against your data, and explain what I find — with charts when useful.
                             </p>
                             <div className="mt-6 flex flex-wrap justify-center gap-2">
                                 {SUGGESTED_QUESTIONS.map((q) => (
@@ -263,6 +294,30 @@ export function ChatScreen({ theme, onToggleTheme, onBack, sessionId, tables }) 
     );
 }
 
+// Rough count of plotted points so wide charts can scroll instead of overflowing.
+function countChartPoints(spec) {
+    if (!spec) return 0;
+    const candidates = [spec.data, spec.rows, spec.values, spec.labels, spec.x, spec.categories];
+    for (const c of candidates) {
+        if (Array.isArray(c)) return c.length;
+    }
+    return 0;
+}
+
+function ChartScroller({ spec }) {
+    const points = countChartPoints(spec);
+    // Give every bar/point a minimum slot; anything wider than the bubble scrolls.
+    const minWidth = points > 8 ? `${points * 48}px` : '100%';
+
+    return (
+        <div className="mt-3 w-full max-w-full overflow-x-auto overflow-y-hidden scroll-thin">
+            <div style={{ minWidth }}>
+                <Chart spec={spec} />
+            </div>
+        </div>
+    );
+}
+
 function MessageBubble({ msg, onFollowUpClick }) {
     const isUser = msg.role === 'user';
 
@@ -283,7 +338,7 @@ function MessageBubble({ msg, onFollowUpClick }) {
             </div>
             <div className="min-w-0 flex-1">
                 <div
-                    className="rounded-2xl rounded-tl-md px-4 py-3"
+                    className="min-w-0 max-w-full overflow-hidden rounded-2xl rounded-tl-md px-4 py-3"
                     style={{
                         background: 'var(--surface)',
                         border: `1px solid ${msg.error ? 'var(--amber)' : 'var(--border)'}`,
@@ -292,7 +347,7 @@ function MessageBubble({ msg, onFollowUpClick }) {
                     <p className="font-body text-sm leading-relaxed" style={{ color: 'var(--text)' }}>
                         {renderMarkdown(msg.text)}
                     </p>
-                    {msg.chart && <Chart spec={msg.chart} />}
+                    {msg.chart && <ChartScroller spec={msg.chart} />}
                 </div>
 
                 {msg.followUpQuestions?.length > 0 && (

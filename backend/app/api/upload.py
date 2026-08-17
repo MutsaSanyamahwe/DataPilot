@@ -1,13 +1,13 @@
-# api/upload.py
+# app/upload.py
 #
 # Three-step upload flow:
 #   1. POST /upload/inspect  -- save raw files, list sheets (mostly unchanged from v1)
-#   2. POST /upload/preview  -- NEW. Loads the selected sheet into a dataframe,
+#   2. POST /upload/preview  -- loads the selected sheet into a dataframe,
 #      runs validation + cleaning inspection, returns a report. Nothing is
 #      persisted to the session store yet -- purely read-only.
 #   3. POST /upload/confirm  -- loads the same dataframe again, optionally
-#      applies cleaning, and persists it via sessions.store for the /ask
-#      route to use.
+#      applies cleaning, and persists it via app.sessions.store for the
+#      /ask route to use.
 #
 # KNOWN LIMITATION: the v2 pipeline (planner/profiling/analysis) currently
 # works on a single dataframe per session, unlike v1 which loaded every
@@ -15,7 +15,9 @@
 # named tables, selecting more than one sheet/file is rejected with a
 # clear error rather than silently combining or dropping data.
 
+import logging
 import shutil
+import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -23,10 +25,12 @@ import pandas as pd
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
-from config import settings
-from validation.validator import validate_dataset, ValidationError
-from cleaning.cleaner import inspect_cleaning, apply_cleaning
-from sessions.store import save_session_df
+from app.config import settings
+from app.validation.validator import validate_dataset, ValidationError
+from app.cleaning.cleaner import inspect_cleaning, apply_cleaning
+from app.sessions.store import save_session_df
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -38,7 +42,6 @@ ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
 @router.post("/upload/inspect")
 async def inspect_files(files: List[UploadFile] = File(...)):
-    import uuid
     session_id = str(uuid.uuid4())
     session_dir = UPLOADS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -101,7 +104,6 @@ def _load_selected_dataframe(session_id: str, selections: List[SheetSelection]) 
     if not session_dir.exists():
         raise HTTPException(status_code=404, detail="Session not found or expired. Please upload your file again.")
 
-    # Flatten selections into a list of (file_path, sheet_name_or_None) to load
     to_load = []
     for selection in selections:
         file_path = session_dir / selection.filename
@@ -128,12 +130,55 @@ def _load_selected_dataframe(session_id: str, selections: List[SheetSelection]) 
 
     file_path, sheet_name = to_load[0]
     extension = file_path.suffix.lower()
-    if extension == ".csv":
-        return pd.read_csv(file_path)
-    return pd.read_excel(file_path, sheet_name=sheet_name)
+    try:
+        if extension == ".csv":
+            return pd.read_csv(file_path)
+        return pd.read_excel(file_path, sheet_name=sheet_name)
+    except pd.errors.EmptyDataError:
+        raise HTTPException(
+            status_code=400,
+            detail="This file appears to be empty. Please check the file and try again.",
+        )
+    except pd.errors.ParserError as e:
+        logger.warning("CSV parse error for %s: %s", file_path.name, e)
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read this file -- it may be corrupted or not a valid CSV. "
+                   "Please check the file and try again.",
+        )
+    except ValueError as e:
+        # Common for Excel: a selected sheet no longer exists, or has no
+        # readable data (e.g. every row/column is genuinely blank).
+        logger.warning("Excel read error for %s (sheet=%s): %s", file_path.name, sheet_name, e)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read the '{sheet_name}' sheet -- it may be empty or in an unexpected format. "
+                   f"Please check the file and try again." if sheet_name else
+                   "Could not read this file. Please check it and try again.",
+        )
+    except Exception as e:
+        # Catch-all: never let a raw file-parsing exception crash the
+        # request uncaught. Log the real detail for debugging, return a
+        # generic but honest message to the user.
+        logger.warning("Unexpected error reading %s: %s", file_path.name, e)
+        raise HTTPException(
+            status_code=400,
+            detail="Could not read this file. Please check that it's a valid CSV or Excel file and try again.",
+        )
 
 
-# ---------- STEP 2: PREVIEW (new) ----------
+def _display_name_for_selection(selections: List[SheetSelection]) -> str:
+    """Builds a human-readable name for the single loaded table, for display only.
+    v2 has no real SQL tables anymore -- this exists purely so ConfirmScreen.jsx's
+    existing table-name display still shows something meaningful."""
+    selection = selections[0]
+    base = Path(selection.filename).stem
+    if selection.sheets:
+        return f"{base}_{selection.sheets[0]}"
+    return base
+
+
+# ---------- STEP 2: PREVIEW ----------
 
 @router.post("/upload/preview")
 async def preview_upload(payload: PreviewRequest):
@@ -147,6 +192,8 @@ async def preview_upload(payload: PreviewRequest):
     report = inspect_cleaning(df)
 
     return {
+        "rows": len(df),
+        "columns": list(df.columns),
         "has_issues": report.has_issues,
         "issues": [
             {"kind": i.kind, "column": i.column, "count": i.count, "description": i.description}
@@ -176,10 +223,18 @@ async def confirm_upload(payload: ConfirmRequest):
     session_dir = UPLOADS_DIR / payload.session_id
     shutil.rmtree(session_dir, ignore_errors=True)
 
+    table_name = _display_name_for_selection(payload.selections)
+
     return {
         "session_id": payload.session_id,
         "rows": len(df),
         "columns": list(df.columns),
         "cleaning_applied": payload.apply_cleaning,
         "changes": change_log,
+        # Kept as a list for compatibility with ConfirmScreen.jsx, which expects
+        # tables.reduce(...) -- always exactly one entry in v2 (see multi-table
+        # limitation noted in _load_selected_dataframe's docstring above).
+        "tables": [
+            {"table_name": table_name, "rows": len(df), "columns": list(df.columns)}
+        ],
     }

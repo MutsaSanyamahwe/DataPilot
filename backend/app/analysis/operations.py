@@ -19,6 +19,31 @@ from typing import Literal
 MAX_SAFETY_ROWS = 200
 
 
+def _require_numeric_for_aggregation(df: pd.DataFrame, column: str, aggregation: str) -> None:
+    """
+    Shared guard for every operation that aggregates a metric column
+    (groupby_agg, compare_groups, pivot, trend). "count" works fine on
+    any dtype (it just counts non-null values), but mean/sum/median/min/
+    max/std all require real numeric data.
+
+    Without this check, a column that LOOKS numeric by name (e.g.
+    "AVERAGE_STUDENT_ATTENDANCE") but is actually stored as text (e.g.
+    "96.30%" with a percent sign, so pandas reads it as a string) causes
+    pandas to raise a raw TypeError deep inside its aggregation internals.
+    That TypeError isn't a ValueError, so it bypasses app/ask.py's
+    friendly-error handling entirely and becomes an unhandled 500. This
+    guard converts that failure into a clean, catchable ValueError before
+    pandas ever gets the chance to raise its own confusing error.
+    """
+    if aggregation == "count":
+        return
+    if not pd.api.types.is_numeric_dtype(df[column]):
+        raise ValueError(
+            f"Column '{column}' isn't numeric, can't compute {aggregation}. "
+            f"It may contain text formatting (like a '%' sign) even though it looks like a number."
+        )
+
+
 def groupby_agg(
     df: pd.DataFrame,
     group_by: str,
@@ -39,6 +64,7 @@ def groupby_agg(
         raise ValueError(f"Column '{group_by}' not found in dataset")
     if metric not in df.columns:
         raise ValueError(f"Column '{metric}' not found in dataset")
+    _require_numeric_for_aggregation(df, metric, aggregation)
 
     result = df.groupby(group_by)[metric].agg(aggregation).reset_index()
     value_col = f"{metric}_{aggregation}"
@@ -239,6 +265,8 @@ def trend(
         raise ValueError(f"Column '{date_column}' not found in dataset")
     if metric is not None and metric not in df.columns:
         raise ValueError(f"Column '{metric}' not found in dataset")
+    if metric is not None:
+        _require_numeric_for_aggregation(df, metric, aggregation)
 
     parsed_dates = pd.to_datetime(df[date_column], format="mixed", errors="coerce")
     if parsed_dates.notna().sum() == 0:
@@ -391,3 +419,125 @@ def duplicate_rows(df: pd.DataFrame, limit: int | None = None) -> pd.DataFrame:
 
     row_cap = min(limit, MAX_SAFETY_ROWS) if limit is not None else MAX_SAFETY_ROWS
     return result.head(row_cap).reset_index(drop=True)
+
+
+def compare_groups(
+    df: pd.DataFrame,
+    group_column: str,
+    group_a: str,
+    group_b: str,
+    metric: str | None = None,
+    aggregation: Literal["mean", "sum", "count", "median", "min", "max"] = "mean",
+) -> pd.DataFrame:
+    """
+    Compares one metric between exactly two values of a categorical
+    column. Computes both the absolute and percentage difference
+    deterministically -- the explainer just reads these numbers rather
+    than computing the difference itself.
+
+    metric is optional: leave it unset for "headcount"/"how many" style
+    comparisons, which just compare row counts between the two groups
+    (same pattern as trend/pivot handling a missing metric).
+
+    Example: compare_groups(df, "department", "Engineering", "Sales", "salary")
+    -> average salary in Engineering vs Sales, plus the difference.
+    Example: compare_groups(df, "department", "Marketing", "Finance")
+    -> headcount in Marketing vs Finance, plus the difference.
+    """
+    if group_column not in df.columns:
+        raise ValueError(f"Column '{group_column}' not found in dataset")
+    if metric is not None and metric not in df.columns:
+        raise ValueError(f"Column '{metric}' not found in dataset")
+    if metric is not None:
+        _require_numeric_for_aggregation(df, metric, aggregation)
+
+    col_as_str = df[group_column].astype(str)
+    subset_a = df[col_as_str == str(group_a)]
+    subset_b = df[col_as_str == str(group_b)]
+
+    if len(subset_a) == 0:
+        raise ValueError(f"No rows found where '{group_column}' is '{group_a}'")
+    if len(subset_b) == 0:
+        raise ValueError(f"No rows found where '{group_column}' is '{group_b}'")
+
+    if metric is None:
+        value_a = float(len(subset_a))
+        value_b = float(len(subset_b))
+        value_col = "count"
+    else:
+        value_a = float(subset_a[metric].agg(aggregation))
+        value_b = float(subset_b[metric].agg(aggregation))
+        value_col = f"{metric}_{aggregation}"
+
+    diff_a_vs_b = value_a - value_b
+    pct_a_vs_b = (diff_a_vs_b / value_b * 100) if value_b != 0 else None
+
+    return pd.DataFrame({
+        group_column: [group_a, group_b],
+        value_col: [value_a, value_b],
+        "difference_vs_other": [diff_a_vs_b, -diff_a_vs_b],
+        "pct_difference_vs_other": [
+            pct_a_vs_b,
+            (-pct_a_vs_b if pct_a_vs_b is not None else None),
+        ],
+    })
+
+
+MAX_PIVOT_COLUMNS = 20  # too many distinct column-values makes a pivot unreadable
+
+
+def pivot(
+    df: pd.DataFrame,
+    row_column: str,
+    col_column: str,
+    metric: str | None = None,
+    aggregation: Literal["mean", "sum", "count", "median", "min", "max"] = "count",
+) -> pd.DataFrame:
+    """
+    Cross-tabulates two categorical columns. If metric is given, cells
+    hold the aggregated metric value (a true pivot table); if metric is
+    left unset, cells hold row counts (a crosstab / frequency table --
+    the same operation, just without a metric to aggregate).
+
+    Example: pivot(df, "department", "region") -> headcount per
+    department x region combination.
+    Example: pivot(df, "department", "region", metric="salary", aggregation="mean")
+    -> average salary per department x region combination.
+    """
+    if row_column not in df.columns:
+        raise ValueError(f"Column '{row_column}' not found in dataset")
+    if col_column not in df.columns:
+        raise ValueError(f"Column '{col_column}' not found in dataset")
+    if row_column == col_column:
+        raise ValueError("row_column and col_column must be different columns")
+    if metric is not None and metric not in df.columns:
+        raise ValueError(f"Column '{metric}' not found in dataset")
+    if metric is not None:
+        _require_numeric_for_aggregation(df, metric, aggregation)
+
+    if metric is None:
+        # Count mode: 0 genuinely means "zero rows in this combination" --
+        # a real, correct zero.
+        result = pd.crosstab(df[row_column], df[col_column])
+    else:
+        # Metric mode: DO NOT fill missing combinations with 0. A pivot_table
+        # fill_value=0 here would make "no employees in this combination"
+        # indistinguishable from "the average salary here is genuinely $0" --
+        # misleading for mean/median/min/max, and just as confusing for sum.
+        # Leave it as NaN; NaN is already handled correctly downstream (charts
+        # and the explainer both convert NaN to None / "no data" safely).
+        result = df.pivot_table(
+            index=row_column, columns=col_column, values=metric,
+            aggfunc=aggregation,
+        )
+
+    if result.shape[1] > MAX_PIVOT_COLUMNS:
+        raise ValueError(
+            f"'{col_column}' has too many distinct values to pivot into columns "
+            f"({result.shape[1]}). Try a column with fewer categories, or swap "
+            f"row_column and col_column."
+        )
+
+    result = result.reset_index()
+    result.columns = [str(c) for c in result.columns]  # flatten any tuple/non-string labels
+    return result.head(MAX_SAFETY_ROWS)
