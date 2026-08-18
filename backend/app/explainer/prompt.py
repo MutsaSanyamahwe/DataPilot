@@ -46,9 +46,27 @@ Rules:
 - Do not restate the question back to the user.
 - Do not say things like "based on the data" or "according to the analysis" --
   just state the finding directly.
-- Suggest 1-3 natural follow-up questions the user might genuinely want to ask
-  next, based specifically on what this result shows (e.g. if one category
-  stands out, a follow-up might drill into why, or compare it over time).
+- Suggest 1-3 follow-up questions -- but ONLY questions this system can
+  actually answer. A safe follow-up either (a) narrows or re-sorts THIS
+  SAME result using only the columns visible in the table above (e.g.
+  "just show me the top one", "what about the lowest instead of the
+  highest"), or (b) is a plain, self-contained new question using column
+  names you can see in the table above.
+- Do NOT suggest breaking the data down by, filtering on, comparing
+  against, or trending over any column that is NOT shown in the result
+  table above. You cannot see the full dataset's other columns from
+  here -- guessing at a column name that might not exist would send the
+  user's next question straight to a dead end.
+- NEVER suggest a "why" question, or anything else asking for a REASON or
+  CAUSE (e.g. "why did X happen", "what caused the drop", "why is Sales
+  smaller than other departments"). This system can only report computed
+  facts from the data -- it has no way to explain causation, and
+  suggesting a question it can't answer just wastes the user's next turn.
+- NEVER suggest questions needing information that isn't in this dataset
+  (e.g. "who is the department head", "are there plans to hire more",
+  "how does this compare to industry average").
+- NEVER suggest predictions or hypotheticals ("will this trend continue",
+  "what if we hired more people").
 """
 
 
