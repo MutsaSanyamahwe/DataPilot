@@ -33,6 +33,7 @@ class AnalysisResult:
     data: pd.DataFrame        # the computed result table
     chart_type: str           # from plan.chart, passed through unchanged
     explanation_intent: str   # from plan.explanation_intent, for the explainer
+    needs_causal_disclaimer: bool = False  # from plan.needs_causal_disclaimer -- see planner/schemas.py
 
 
 # Maps each Operation to the function in operations.py that implements it.
@@ -109,4 +110,5 @@ def run_plan(plan: AnalysisPlan, validated_params: Any, df: pd.DataFrame) -> Ana
         data=result_df,
         chart_type=plan.chart.value,
         explanation_intent=plan.explanation_intent,
+        needs_causal_disclaimer=plan.needs_causal_disclaimer,
     )

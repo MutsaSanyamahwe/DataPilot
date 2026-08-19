@@ -29,7 +29,7 @@ from app.planner.service import (
 )
 from app.analysis.registry import run_plan
 from app.charts.builder import build_chart
-from app.explainer.service import get_explanation
+from app.explainer.service import get_explanation, explain_failure
 from app.llm_errors import LLMRateLimitError, LLMServiceError
 
 logger = logging.getLogger(__name__)
@@ -51,6 +51,34 @@ class AskRequest(BaseModel):
     # purely per-request context). Optional and defaults to empty so
     # older frontend calls without this field still work unchanged.
     history: List[ConversationTurn] = []
+
+
+def _explain_failure_or_fallback(
+    question: str,
+    reason: str,
+    dataset_profile: dict,
+    conversation_history: list[dict],
+    fallback_text: str,
+) -> dict:
+    """
+    Shared by all three failure paths below (unsupported operation,
+    invalid params, runtime operation error). Calls the failure-coaching
+    explainer -- which sees the dataset's real columns and can suggest
+    concrete rephrasings -- and falls back to a generic canned message
+    only if that call itself fails. A failure explaining a failure
+    should never crash or cascade into a worse experience than the old
+    static message.
+    """
+    try:
+        failure = explain_failure(question, reason, dataset_profile, conversation_history)
+        return {
+            "text": failure.message,
+            "chart": None,
+            "follow_up_questions": failure.follow_up_questions,
+        }
+    except (LLMRateLimitError, LLMServiceError) as e:
+        logger.warning("explain_failure itself failed for question %r: %s", question, e)
+        return {"text": fallback_text, "chart": None, "follow_up_questions": []}
 
 
 @router.post("/ask")
@@ -77,38 +105,35 @@ def ask(payload: AskRequest):
         # can't exist without failing at import time) -- but keep this as
         # a safety net and log it clearly if it ever fires again.
         logger.warning("Planner selected an unsupported operation %r for question %r", e.operation, question)
-        return {
-            "text": "I wasn't able to find a way to analyze that with this dataset. "
-                    "Could you rephrase your question?",
-            "chart": None,
-            "follow_up_questions": [],
-        }
+        reason = f"The system tried to use an operation called '{e.operation}', which isn't actually implemented."
+        return _explain_failure_or_fallback(
+            question, reason, dataset_profile, conversation_history,
+            fallback_text="I wasn't able to find a way to analyze that with this dataset. Could you rephrase your question?",
+        )
     except InvalidPlanError as e:
         # This fires for ANY operation whose params failed validation --
         # not just groupby_agg, even though the message used to hardcode
         # "group-by analysis" from back when that was the only operation
         # that existed. Log the real validation detail server-side (which
-        # operation, which fields failed) so this is actually diagnosable,
-        # but keep the user-facing text operation-agnostic.
+        # operation, which fields failed) so this is actually diagnosable.
         logger.warning(
             "Plan validation failed for question %r (operation=%s): %s",
             question, e.operation, e.errors,
         )
-        return {
-            "text": "I understood what you wanted to analyze, but couldn't figure "
-                    "out exactly which columns or values to use. Could you rephrase, "
-                    "or be more specific about the columns involved?",
-            "chart": None,
-            "follow_up_questions": [],
-        }
+        reason = f"The system tried to use the '{e.operation}' operation but some required information was missing or invalid: {e.errors}"
+        return _explain_failure_or_fallback(
+            question, reason, dataset_profile, conversation_history,
+            fallback_text="I understood what you wanted to analyze, but couldn't figure out exactly "
+                          "which columns or values to use. Could you rephrase, or be more specific?",
+        )
     except LLMRateLimitError:
         raise HTTPException(status_code=429, detail="You've hit the free-tier rate limit. Wait a moment and try again.")
     except LLMServiceError as e:
         raise HTTPException(status_code=502, detail=f"AI service error: {e.detail}")
 
     # The planner can choose to ask a clarifying question instead of guessing.
-    # No point running analysis or spending a second LLM call on an
-    # explanation for a plan that was never actually executed.
+    # No point running analysis or spending an extra LLM call for a plan
+    # that was never actually executed -- the clarification IS the answer.
     if plan.clarification_needed:
         return {
             "text": plan.clarification_needed,
@@ -127,21 +152,18 @@ def ask(payload: AskRequest):
         )
     except ValueError as e:
         # An operation function rejected the plan's params at runtime --
-        # e.g. the planner picked a non-numeric column for a correlation.
-        # This should be rare now that the prompt explicitly warns about
-        # column types, but it can still happen. NEVER show the raw
-        # internal message to the user (it's meant for developers, not
-        # a chat reply) -- log it for debugging, and respond the same
-        # friendly way as the other "couldn't run this" cases above
-        # (UnsupportedOperationError / InvalidPlanError / clarification_needed),
-        # so the user sees a normal conversational reply, not an error bubble.
+        # e.g. the planner picked a non-numeric column for a correlation,
+        # or a pivot with too many distinct columns. This should be rarer
+        # now that the prompt explicitly warns about column types, but it
+        # can still happen. NEVER show the raw internal message to the
+        # user -- log it for debugging, and let the failure-coaching
+        # explainer turn it into something genuinely useful.
         logger.warning("Analysis operation failed for question %r: %s", question, e)
-        return {
-            "text": "I wasn't able to run that analysis with the columns I picked. "
-                    "Could you rephrase, or specify which column you mean?",
-            "chart": None,
-            "follow_up_questions": [],
-        }
+        return _explain_failure_or_fallback(
+            question, str(e), dataset_profile, conversation_history,
+            fallback_text="I wasn't able to run that analysis with the columns I picked. "
+                          "Could you rephrase, or specify which column you mean?",
+        )
 
     chart = build_chart(result)
 

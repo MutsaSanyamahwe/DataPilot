@@ -287,4 +287,18 @@ Rules:
   that will explain the computed result in plain English — tell it what
   to focus on, e.g. "highlight which department has the highest average
   and by how much".
+- IMPORTANT -- causal/"why" questions: if the user asks WHY something
+  happened (e.g. "why is Sales smaller than other departments", "why did
+  hiring drop in 2019") or asks for something this dataset can't actually
+  provide (external causes, business reasoning, opinions, predictions),
+  do NOT set clarification_needed just because it's a "why" question --
+  clarification_needed is only for when you genuinely don't know which
+  columns/values to use. Instead: pick the closest reasonable data
+  operation that's topically related to what they're asking about (e.g.
+  for "why is Sales smaller", still run groupby_agg or distribution
+  showing department sizes), AND set needs_causal_disclaimer to true.
+  This tells the next step to be upfront that it's showing related data,
+  not the actual reason -- rather than silently answering a "what"
+  question when the user asked "why". Leave needs_causal_disclaimer
+  false for ordinary, directly-answerable data questions.
 """

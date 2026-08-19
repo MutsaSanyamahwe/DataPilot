@@ -1,19 +1,24 @@
 # app/explainer/prompt.py
 #
-# Builds the text prompt sent to Gemini for the explanation step. Takes
-# the AnalysisResult produced by analysis.registry.run_plan() -- the
-# already-computed data, not raw user data -- and turns it into a
-# compact, JSON-safe table the LLM can read and explain.
+# Builds prompts for both explainer LLM calls:
+#   - build_explainer_prompt: narrates an already-computed AnalysisResult
+#     (does NOT see the dataset's other columns -- narration only).
+#   - build_failure_prompt: explains why a question couldn't be turned
+#     into a valid plan, and suggests real rephrasings (DOES see the
+#     dataset's columns -- that's the whole point of this one).
 #
-# Important: this file does NOT recompute anything. The numbers in the
-# prompt are exactly what analysis/operations.py already calculated.
-# The LLM's only job here is narration, matching the "LLM never does
-# the math" architecture.
+# Important: build_explainer_prompt does NOT recompute anything. The
+# numbers in its prompt are exactly what analysis/operations.py already
+# calculated. The LLM's only job there is narration, matching the
+# "LLM never does the math" architecture. build_failure_prompt has a
+# different job entirely -- helping the user reformulate a question that
+# never got as far as producing a result.
 
 import math
 import pandas as pd
 
 from app.analysis.registry import AnalysisResult
+from app.planner.prompt import _format_conversation_history
 
 MAX_ROWS_IN_PROMPT = 30  # keep the prompt small; explanation doesn't need every row
 
@@ -26,6 +31,21 @@ def build_explainer_prompt(user_question: str, result: AnalysisResult) -> str:
         else ""
     )
 
+    causal_disclaimer_section = ""
+    if result.needs_causal_disclaimer:
+        causal_disclaimer_section = """
+IMPORTANT: The user actually asked a "why" question, or something this
+dataset can't directly answer (an external cause, business reasoning, an
+opinion). The data below is only the CLOSEST RELATED information
+available -- it does not explain the actual reason they asked about.
+Start your explanation with a brief, honest, natural sentence
+acknowledging this (e.g. "I can't tell you exactly why, but here's what
+the data shows:" or "This dataset doesn't capture the reason for that,
+but here's the related breakdown:") -- then present the data as useful
+context, not as if it fully answers their question. Do not fabricate a
+cause. Do not imply the numbers below explain the "why".
+"""
+
     return f"""You are explaining the result of a data analysis to a user in a chat
 interface. The computation has already been done by deterministic Python
 code -- your only job is to explain what the numbers mean in plain English.
@@ -36,7 +56,7 @@ the result as if you're a helpful analyst summarizing findings.
 User's original question: "{user_question}"
 
 What this analysis was meant to focus on: {result.explanation_intent}
-
+{causal_disclaimer_section}
 Computed result ({result.operation.value}):
 {table_json}{truncated_note}
 
@@ -67,6 +87,69 @@ Rules:
   "how does this compare to industry average").
 - NEVER suggest predictions or hypotheticals ("will this trend continue",
   "what if we hired more people").
+"""
+
+
+def build_failure_prompt(
+    user_question: str,
+    reason: str,
+    dataset_profile: dict,
+    conversation_history: list[dict] | None = None,
+) -> str:
+    """
+    Builds the prompt for explaining a FAILED plan -- the planner
+    either picked an operation that doesn't exist, left required params
+    unfilled, or the operation itself rejected the params at runtime
+    (e.g. picked a non-numeric column for an average).
+
+    Unlike build_explainer_prompt, this DOES receive the dataset's real
+    column list -- its whole job is helping the user reformulate using
+    columns that actually exist, which build_explainer_prompt deliberately
+    never needs to do.
+    """
+    columns_description = "\n".join(
+        f"- {col['name']} ({col['dtype']}), example values: {col['sample_values']}"
+        for col in dataset_profile.get("columns", [])
+    )
+    row_count = dataset_profile.get("row_count", "unknown")
+
+    history_block = _format_conversation_history(conversation_history)
+    history_section = f"\nRecent conversation (most recent last):\n{history_block}\n" if history_block else ""
+
+    return f"""A user asked a data question, but the system could NOT turn it
+into a valid analysis. Your job is to explain this to the user in a
+friendly, helpful way, and suggest 1-3 real alternative questions that
+WOULD work with this dataset.
+
+Internal technical reason (for YOUR understanding only -- do not repeat
+this raw text to the user, it's meant for developers, not a chat reply):
+{reason}
+
+Dataset ({row_count} rows), actual columns available:
+{columns_description}
+{history_section}
+User's question that failed: "{user_question}"
+
+Rules:
+- In `message`, briefly and kindly explain why this specific question
+  couldn't be answered, in plain language -- never repeat the internal
+  technical reason above verbatim (no Python types, no field names like
+  "metric" or "group_by", no pydantic/validation language).
+- Then give concrete guidance: point to real column names from the list
+  above that are close to what the user was probably asking about, if
+  any exist.
+- If the recent conversation shows this question was a short follow-up
+  reply (e.g. answering a clarifying question the assistant just asked),
+  factor that context into your explanation and suggestions.
+- In `follow_up_questions`, suggest 1-3 alternative questions the user
+  could ask instead that WOULD actually work -- phrased the way a user
+  would type them, using ONLY real column names from the list above.
+- Every suggestion must be something this system can actually compute:
+  filtering, grouping/aggregating, comparing two specific groups, a
+  trend over time (only if a real date-like column exists above), a
+  distribution, a correlation between two numeric columns, outliers, or
+  a plain preview of rows. Never suggest a "why"/cause question, a
+  prediction, or anything needing information not in this dataset.
 """
 
 

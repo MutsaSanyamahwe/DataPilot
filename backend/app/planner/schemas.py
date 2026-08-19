@@ -298,6 +298,24 @@ class AnalysisPlan(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
     clarification_needed: Optional[str] = None
 
+    # Set this when the user's actual question asks WHY something happened,
+    # or needs information this dataset fundamentally can't provide (external
+    # causes, business context, opinions) -- even though you're still
+    # choosing the closest reasonable data operation as a topically-related
+    # answer. This is NOT the same as clarification_needed: clarification is
+    # for "I don't know which columns you mean"; this is for "I know what
+    # data to show, but it can't actually explain the reason being asked
+    # about." Setting this tells the explainer to be upfront that it's
+    # showing related data, not the actual cause -- rather than silently
+    # answering a "what" when the user asked "why".
+    needs_causal_disclaimer: bool = Field(
+        default=False,
+        description="True if the user asked WHY something happened or for "
+        "information outside this dataset, and you're answering with the "
+        "closest related data instead of the actual reason. False for "
+        "direct, fully-answerable data questions.",
+    )
+
     def validate_params(self) -> BaseModel:
         """
         Builds and validates the correct param model for self.operation,
