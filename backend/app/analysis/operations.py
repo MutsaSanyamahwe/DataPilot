@@ -150,6 +150,24 @@ def distribution(
     return counts.reset_index(drop=True)
 
 
+# Accepted spellings for a "true"/"false" filter value, case-insensitive.
+# Covers the realistic range of how a user or the planner might phrase it.
+_TRUE_STRINGS = {"true", "t", "yes", "y", "1"}
+_FALSE_STRINGS = {"false", "f", "no", "n", "0"}
+
+
+def _coerce_to_bool(filter_value: str, filter_column: str) -> bool:
+    normalized = str(filter_value).strip().lower()
+    if normalized in _TRUE_STRINGS:
+        return True
+    if normalized in _FALSE_STRINGS:
+        return False
+    raise ValueError(
+        f"Column '{filter_column}' is a true/false column, but "
+        f"'{filter_value}' isn't recognizable as true or false"
+    )
+
+
 def filter_rows(
     df: pd.DataFrame,
     filter_column: str,
@@ -166,15 +184,23 @@ def filter_rows(
     -> only rows where department is Sales.
 
     filter_value arrives as a string (Gemini's structured output can't mix
-    types on one field); if the target column is numeric, it's coerced to
-    a number before comparing.
+    types on one field). It's coerced before comparing:
+    - boolean columns: "true"/"false" (any case, plus t/f/yes/no/1/0) -> real bool
+    - numeric columns: parsed as a number
+    Boolean is checked BEFORE numeric, because pandas' is_numeric_dtype()
+    considers boolean columns numeric too (bool is numeric-like at the
+    numpy level) -- without this ordering, a value like "true" would fall
+    into the numeric branch and fail to parse as a float, every time,
+    regardless of casing or phrasing.
     """
     if filter_column not in df.columns:
         raise ValueError(f"Column '{filter_column}' not found in dataset")
 
     series = df[filter_column]
     value = filter_value
-    if pd.api.types.is_numeric_dtype(series):
+    if pd.api.types.is_bool_dtype(series):
+        value = _coerce_to_bool(filter_value, filter_column)
+    elif pd.api.types.is_numeric_dtype(series):
         try:
             value = float(filter_value)
             if value.is_integer():

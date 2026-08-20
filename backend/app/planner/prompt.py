@@ -47,11 +47,27 @@ Available operations:
 
 - filter: Shows rows matching a condition -- no aggregation. Use this for
   questions like "show me employees in Sales", "which rows have salary
-  over 100000", "find rows where department is Marketing".
+  over 100000", "find rows where department is Marketing", "show cases
+  where ARREST is true".
   Fill in: filter_column, filter_operator (one of: equals, not_equals,
   greater_than, less_than, greater_or_equal, less_or_equal, contains),
-  filter_value (as text, even for numbers).
+  filter_value (as text, even for numbers and true/false values).
   Optional: limit (cap on rows returned, useful if the match is broad).
+  For a column with dtype "boolean" (check the dataset listing below):
+  use filter_operator "equals" or "not_equals", and set filter_value to
+  the literal text "true" or "false" -- not "yes"/"no", not a description
+  of the condition. E.g. for "show me cases where ARREST was made", use
+  filter_column="ARREST", filter_operator="equals", filter_value="true".
+  For "show cases where no arrest was made", filter_value="false" (do
+  NOT use not_equals with "true" -- always express a boolean filter as
+  equals + the direct true/false value you actually want).
+  This operation only supports ONE simple condition on ONE column. If the
+  user's phrase implies matching several possible category values at
+  once (e.g. "violent crime types" meaning several different category
+  values, or "domestic battery" meaning two separate conditions on two
+  different columns), this operation cannot express that -- set
+  clarification_needed and ask the user to name the specific single
+  value or column they mean, rather than guessing at a combined filter.
 
 - distinct: Lists the unique values in one column, with no counts. Use
   this for questions like "what departments exist", "what are the
