@@ -15,6 +15,11 @@ function App() {
   const [inspectFiles, setInspectFiles] = useState([])
   const [selections, setSelections] = useState([])
   const [loadedTables, setLoadedTables] = useState([])
+  // Type-aware column info (name/dtype/sample_values) from /upload/confirm --
+  // used by ChatScreen's "explore your data" sidebar to generate suggested
+  // questions that actually match each column's real type, instead of
+  // guessing from bare column names.
+  const [columnsDetail, setColumnsDetail] = useState([])
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
@@ -29,6 +34,7 @@ function App() {
     setInspectFiles([])
     setSelections([])
     setLoadedTables([])
+    setColumnsDetail([])
     setView('landing')
   }
 
@@ -81,9 +87,10 @@ function App() {
         selections={selections}
         // ConfirmScreen calls /upload/confirm itself and passes the real
         // response here once the user commits -- that's where "tables"
-        // actually comes from now.
+        // and "columns_detail" actually come from now.
         onProceed={(data) => {
           setLoadedTables(data.tables)
+          setColumnsDetail(data.columns_detail || [])
           setView('chat')
         }}
       />
@@ -98,6 +105,7 @@ function App() {
         onBack={resetSession}
         sessionId={sessionId}
         tables={loadedTables}
+        columnsDetail={columnsDetail}
       />
     )
   }

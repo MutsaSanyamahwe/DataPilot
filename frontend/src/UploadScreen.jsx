@@ -9,7 +9,13 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     const [isDragging, setIsDragging] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState(null);
-    const [selectedFiles, setSelectedFiles] = useState([]);
+    // Single file, not an array -- the backend only supports one
+    // dataframe per session (see upload.py's module docstring: selecting
+    // more than one sheet/file is rejected at /upload/confirm). Letting
+    // someone pick several here just means they find that out later,
+    // after they've already gone through Inspect/Confirm -- better to
+    // make it impossible to pick more than one in the first place.
+    const [selectedFile, setSelectedFile] = useState(null);
     const inputRef = useRef(null);
 
     const handleFiles = useCallback((fileList) => {
@@ -19,22 +25,18 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
             return ext === 'csv' || ext === 'xlsx' || ext === 'xls';
         });
         if (valid.length === 0) {
-            setError('Please upload CSV or Excel files (.csv, .xlsx, .xls).');
+            setError('Please upload a CSV or Excel file (.csv, .xlsx, .xls).');
             return;
         }
-        setError(null);
-        setSelectedFiles((prev) => {
-            const existingKeys = new Set(prev.map((f) => `${f.name}-${f.size}`));
-            const merged = [...prev];
-            for (const file of valid) {
-                const key = `${file.name}-${file.size}`;
-                if (!existingKeys.has(key)) {
-                    merged.push(file);
-                    existingKeys.add(key);
-                }
-            }
-            return merged;
-        });
+        if (fileList.length > 1) {
+            // Someone dragged/selected several at once -- take the first
+            // valid one and say so, rather than silently discarding the
+            // rest or letting a multi-file selection through.
+            setError(`Only one file can be analyzed at a time — using "${valid[0].name}".`);
+        } else {
+            setError(null);
+        }
+        setSelectedFile(valid[0]);
     }, []);
 
     const handleDragOver = (e) => {
@@ -54,12 +56,15 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     };
 
     const handleProceed = async () => {
-        if (selectedFiles.length === 0) return;
+        if (!selectedFile) return;
         setUploading(true);
         setError(null);
 
         const formData = new FormData();
-        selectedFiles.forEach((file) => formData.append('files', file));
+        // Still appended under "files" -- the backend's /upload/inspect
+        // accepts a list (List[UploadFile]) even though we only ever send
+        // one now; no backend change needed for this restriction.
+        formData.append('files', selectedFile);
 
         try {
             const res = await fetch(`${API_BASE}/upload/inspect`, {
@@ -73,14 +78,15 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
             const data = await res.json();
             onFilesParsed(data); // { session_id, files }
         } catch (err) {
-            setError(err.message || 'Could not upload those files. Is the backend running?');
+            setError(err.message || 'Could not upload that file. Is the backend running?');
         } finally {
             setUploading(false);
         }
     };
 
-    const removeFile = (idx) => {
-        setSelectedFiles((prev) => prev.filter((_, i) => i !== idx));
+    const clearFile = () => {
+        setSelectedFile(null);
+        setError(null);
     };
 
     return (
@@ -104,7 +110,7 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                             Drop your data here
                         </h1>
                         <p className="mt-2 font-body text-sm" style={{ color: 'var(--muted)' }}>
-                            CSV or Excel files. You can add multiple files at once.
+                            CSV or Excel file — one file per session.
                         </p>
                     </div>
 
@@ -124,7 +130,6 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                         <input
                             ref={inputRef}
                             type="file"
-                            multiple
                             accept=".csv,.xlsx,.xls"
                             className="hidden"
                             onChange={(e) => handleFiles(e.target.files)}
@@ -141,7 +146,7 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                                 <UploadCloud size={28} strokeWidth={1.75} />
                             </div>
                             <p className="font-display text-lg font-semibold">
-                                {isDragging ? 'Release to upload' : 'Drag & drop files here'}
+                                {isDragging ? 'Release to upload' : 'Drag & drop a file here'}
                             </p>
                             <p className="mt-1 font-mono text-xs" style={{ color: 'var(--muted)' }}>
                                 or click to browse
@@ -155,32 +160,30 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                         </p>
                     )}
 
-                    {selectedFiles.length > 0 && (
-                        <div className="mt-5 space-y-2 animate-slide-up">
-                            {selectedFiles.map((file, idx) => (
-                                <div key={idx} className="flex items-center justify-between rounded-lg surface px-4 py-3 animate-fade-in">
-                                    <div className="flex items-center gap-3">
-                                        <FileSpreadsheet size={18} style={{ color: 'var(--teal)' }} />
-                                        <div>
-                                            <p className="font-body text-sm font-medium">{file.name}</p>
-                                            <p className="font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                                                {(file.size / 1024).toFixed(1)} KB
-                                            </p>
-                                        </div>
+                    {selectedFile && (
+                        <div className="mt-5 animate-slide-up">
+                            <div className="flex items-center justify-between rounded-lg surface px-4 py-3 animate-fade-in">
+                                <div className="flex items-center gap-3">
+                                    <FileSpreadsheet size={18} style={{ color: 'var(--teal)' }} />
+                                    <div>
+                                        <p className="font-body text-sm font-medium">{selectedFile.name}</p>
+                                        <p className="font-mono text-xs" style={{ color: 'var(--muted)' }}>
+                                            {(selectedFile.size / 1024).toFixed(1)} KB
+                                        </p>
                                     </div>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); removeFile(idx); }}
-                                        className="rounded-lg p-1.5 transition-colors hover:opacity-70"
-                                        style={{ color: 'var(--muted)' }}
-                                    >
-                                        <X size={16} />
-                                    </button>
                                 </div>
-                            ))}
+                                <button
+                                    onClick={(e) => { e.stopPropagation(); clearFile(); }}
+                                    className="rounded-lg p-1.5 transition-colors hover:opacity-70"
+                                    style={{ color: 'var(--muted)' }}
+                                >
+                                    <X size={16} />
+                                </button>
+                            </div>
                         </div>
                     )}
 
-                    {selectedFiles.length > 0 && (
+                    {selectedFile && (
                         <div className="mt-6 flex justify-center animate-fade-in">
                             <button
                                 onClick={handleProceed}
@@ -206,7 +209,7 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
 
             <footer className="px-6 py-5 text-center">
                 <p className="font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                    Your data stays in the session — nothing is stored after you're done.
+                    Your file is deleted the moment you leave — or automatically after a short period of inactivity.
                 </p>
             </footer>
         </div>

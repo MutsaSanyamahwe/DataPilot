@@ -1,7 +1,6 @@
 import {
   ArrowRight,
   FileSpreadsheet,
-  Layers,
   Database,
   Upload,
   MessageSquareText,
@@ -10,6 +9,7 @@ import {
   ShieldCheck,
   Zap,
   Sparkles,
+  Compass,
 } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
@@ -19,7 +19,7 @@ const STEPS = [
   {
     icon: Upload,
     title: 'Upload your data',
-    desc: 'Drop a CSV or Excel file. Multi-sheet workbooks are detected automatically and each sheet becomes a queryable table.',
+    desc: "Drop a single CSV or Excel file. If it's a multi-sheet workbook, just pick the one sheet you want to analyze.",
   },
   {
     icon: MessageSquareText,
@@ -29,20 +29,20 @@ const STEPS = [
   {
     icon: LineChart,
     title: 'Get answers & charts',
-    desc: 'DataPilot writes the SQL, runs the analysis, and returns charts plus a downloadable report you can share.',
+    desc: 'DataPilot figures out the right analysis, runs it directly against your data, and explains what it finds — with charts when useful, plus a downloadable report you can share.',
   },
 ];
 
 const FEATURES = [
   {
     icon: Database,
-    title: 'Real SQL under the hood',
-    desc: 'Every answer is backed by a real query against your data — not a guess. Inspect the generated SQL anytime.',
+    title: 'No hallucinated numbers',
+    desc: 'The AI decides what to analyze; a fixed set of tested operations actually computes it — never arbitrary code, never a made-up figure.',
   },
   {
-    icon: Layers,
-    title: 'Multi-sheet aware',
-    desc: 'Upload a workbook with ten tabs and DataPilot understands the relationships between them.',
+    icon: Compass,
+    title: 'Guided starting point',
+    desc: "Not sure what to ask? Explore hands you ready-made questions tailored to your exact dataset's columns before you type a thing.",
   },
   {
     icon: LineChart,
@@ -52,7 +52,7 @@ const FEATURES = [
   {
     icon: FileSpreadsheet,
     title: 'CSV & Excel, no cleanup',
-    desc: 'Messy headers, merged cells, and mixed types are handled on import. Your file works as-is.',
+    desc: 'Messy headers, blank rows, and mixed types are handled on import. Your file works as-is.',
   },
   {
     icon: Zap,
@@ -62,7 +62,7 @@ const FEATURES = [
   {
     icon: ShieldCheck,
     title: 'Private by default',
-    desc: 'Your data lives in the session and is discarded when you leave. Nothing is stored or trained on.',
+    desc: 'Your file lives in your session and is deleted the moment you leave — or automatically if you walk away. Nothing lingers, nothing is trained on.',
   },
 ];
 
@@ -131,8 +131,9 @@ export function Landing({ theme, onToggleTheme, onGetStarted }) {
             style={{ color: 'var(--muted)', animationDelay: '0.2s' }}
           >
             Drop in a CSV or Excel file, type a question the way you'd ask a
-            colleague, and DataPilot writes the SQL, runs the analysis, and hands
-            you back an answer — charts and a downloadable report included.
+            colleague, and DataPilot figures out the right analysis, runs it
+            directly against your data, and hands you back an answer —
+            charts and a downloadable report included.
           </p>
 
           {/* CTA */}
@@ -166,12 +167,12 @@ export function Landing({ theme, onToggleTheme, onGetStarted }) {
               CSV & Excel
             </span>
             <span className="pill">
-              <Layers size={13} style={{ color: 'var(--teal)' }} />
-              Multi-sheet support
+              <Compass size={13} style={{ color: 'var(--teal)' }} />
+              Guided suggestions
             </span>
             <span className="pill">
               <Database size={13} style={{ color: 'var(--teal)' }} />
-              Runs real SQL
+              Grounded answers
             </span>
             <span className="pill">
               <Sparkles size={13} style={{ color: 'var(--teal)' }} />
@@ -190,7 +191,7 @@ export function Landing({ theme, onToggleTheme, onGetStarted }) {
             className="mt-2 text-center font-mono text-[11px] tracking-wide"
             style={{ color: 'var(--muted)' }}
           >
-            DataPilot traces your question → query → result
+            DataPilot traces your question → analysis → result
           </p>
         </div>
 
@@ -356,8 +357,8 @@ export function Landing({ theme, onToggleTheme, onGetStarted }) {
               className="mx-auto mt-3 max-w-md font-body text-base"
               style={{ color: 'var(--muted)' }}
             >
-              Upload a file and ask away. Completely free, no sign-up, no data
-              stored — everything stays in your session.
+              Upload a file and ask away. Completely free, no sign-up —
+              your file is deleted the moment you're done.
             </p>
             <button
               onClick={onGetStarted}
@@ -384,7 +385,7 @@ export function Landing({ theme, onToggleTheme, onGetStarted }) {
             style={{ color: 'var(--muted)' }}
           >
             <Lock size={11} />
-            Your data stays in the session — nothing is stored after you're done.
+            Your file is deleted the moment you leave — or automatically after a short period of inactivity.
           </p>
           <p
             className="font-mono text-xs"
