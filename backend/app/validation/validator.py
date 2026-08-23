@@ -9,6 +9,8 @@
 
 import pandas as pd
 
+from app.config import settings
+
 
 class ValidationError(Exception):
     """Raised when a dataset fails a hard validation check. Carries a
@@ -20,6 +22,18 @@ class ValidationError(Exception):
 
 MIN_ROWS = 1
 MIN_COLUMNS = 1
+# Upper bounds come from settings (app/config.py) rather than being
+# hardcoded here, so ops can tune them via env vars without a code change.
+# max_rows_dataset exists to keep the whole pipeline (parquet storage,
+# profiling, the per-question analysis pass) fast and within the
+# analysis_timeout_seconds budget -- pandas ops on a multi-million-row
+# dataframe inside a single request can blow that budget easily.
+# max_columns_dataset exists mainly for the planner LLM call: the dataset
+# profile lists every column with dtype + sample values, and a very wide
+# dataset would bloat that prompt past what's useful (and past what the
+# free-tier model was validated against).
+MAX_ROWS = settings.max_rows_dataset
+MAX_COLUMNS = settings.max_columns_dataset
 
 
 def validate_dataset(df: pd.DataFrame) -> None:
@@ -33,6 +47,8 @@ def validate_dataset(df: pd.DataFrame) -> None:
     _check_no_duplicate_columns(df)
     _check_not_entirely_null(df)
     _check_has_named_columns(df)
+    _check_not_too_many_rows(df)
+    _check_not_too_many_columns(df)
 
 
 def _check_not_empty(df: pd.DataFrame) -> None:
@@ -60,6 +76,24 @@ def _check_not_entirely_null(df: pd.DataFrame) -> None:
     if df.isnull().all().all():
         raise ValidationError(
             "Every cell in this file is empty. Please check the file and try again."
+        )
+
+
+def _check_not_too_many_rows(df: pd.DataFrame) -> None:
+    if len(df) > MAX_ROWS:
+        raise ValidationError(
+            f"This file has {len(df):,} rows, which is more than the "
+            f"{MAX_ROWS:,}-row limit for this tool. Please upload a smaller "
+            "file, or pre-filter/aggregate it before uploading."
+        )
+
+
+def _check_not_too_many_columns(df: pd.DataFrame) -> None:
+    if len(df.columns) > MAX_COLUMNS:
+        raise ValidationError(
+            f"This file has {len(df.columns):,} columns, which is more than "
+            f"the {MAX_COLUMNS:,}-column limit for this tool. Please remove "
+            "unused columns and try again."
         )
 
 

@@ -31,6 +31,7 @@ from app.analysis.registry import run_plan
 from app.charts.builder import build_chart
 from app.explainer.service import get_explanation, explain_failure
 from app.llm_errors import LLMRateLimitError, LLMServiceError
+from app.suggestions.generator import generate_suggested_questions
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -134,11 +135,26 @@ def ask(payload: AskRequest):
     # The planner can choose to ask a clarifying question instead of guessing.
     # No point running analysis or spending an extra LLM call for a plan
     # that was never actually executed -- the clarification IS the answer.
+    # This is also the path a genuinely out-of-scope question lands on --
+    # e.g. something unrelated to the dataset entirely, or an operation
+    # this dataset's columns can't support (see planner/prompt.py's rule:
+    # "the question doesn't match any available operation at all" ->
+    # clarification_needed). Rather than leave the user at a dead end with
+    # nothing to do next, hand back a few guaranteed-answerable starter
+    # questions for this exact dataset (same generator that powers the
+    # chat screen's initial suggestions) so there's always a next tap.
     if plan.clarification_needed:
+        try:
+            fallback_suggestions = [
+                s.question for s in generate_suggested_questions(df, max_questions=3)
+            ]
+        except Exception:
+            logger.exception("Failed to generate fallback suggestions for question %r", question)
+            fallback_suggestions = []
         return {
             "text": plan.clarification_needed,
             "chart": None,
-            "follow_up_questions": [],
+            "follow_up_questions": fallback_suggestions,
         }
 
     try:

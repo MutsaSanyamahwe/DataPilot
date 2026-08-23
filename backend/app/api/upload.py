@@ -35,7 +35,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 UPLOADS_DIR = Path(settings.storage_dir) / "uploads"
-ALLOWED_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+# Single source of truth for both is settings (app/config.py) -- this used
+# to be a separately hardcoded set here, which meant changing
+# settings.allowed_extensions wouldn't actually change what /upload/inspect
+# accepted.
+ALLOWED_EXTENSIONS = set(settings.allowed_extensions)
+MAX_UPLOAD_SIZE_BYTES = settings.max_upload_size_mb * 1024 * 1024
 
 
 # ---------- STEP 1: INSPECT ----------
@@ -51,14 +56,32 @@ async def inspect_files(files: List[UploadFile] = File(...)):
     for file in files:
         extension = Path(file.filename).suffix.lower()
         if extension not in ALLOWED_EXTENSIONS:
+            shutil.rmtree(session_dir, ignore_errors=True)
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported file type '{extension}' for '{file.filename}'."
+                detail=f"Unsupported file type '{extension}' for '{file.filename}'. "
+                       f"Allowed types: {', '.join(sorted(ALLOWED_EXTENSIONS))}."
             )
 
         saved_path = session_dir / file.filename
+        size_bytes = 0
         with open(saved_path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+            # Stream in chunks and enforce the size cap while writing,
+            # rather than reading the whole upload into memory first --
+            # a malicious or oversized file shouldn't get fully buffered
+            # in RAM before we notice it's too big.
+            while chunk := await file.read(1024 * 1024):
+                size_bytes += len(chunk)
+                if size_bytes > MAX_UPLOAD_SIZE_BYTES:
+                    f.close()
+                    shutil.rmtree(session_dir, ignore_errors=True)
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"'{file.filename}' is larger than the "
+                               f"{settings.max_upload_size_mb}MB upload limit. "
+                               "Please upload a smaller file.",
+                    )
+                f.write(chunk)
 
         if extension == ".csv":
             file_previews.append({"filename": file.filename, "type": "csv", "sheets": None})
