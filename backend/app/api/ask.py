@@ -14,12 +14,14 @@
 # the shared rate-limit/service-error handling from app/llm_errors.py.
 
 import logging
+import concurrent.futures
 
 from typing import List, Literal
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.config import settings
 from app.sessions.store import load_session_df
 from app.profiling.profiler import profile_dataset
 from app.planner.service import (
@@ -37,6 +39,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 MAX_QUESTION_LENGTH = 1000
+
+# Bounds how long a single /ask request will wait for run_plan() before
+# giving up and telling the user, instead of the request just hanging.
+# NOTE (portfolio-scope, being upfront about the real limitation): this
+# uses a thread pool with a result timeout, not a hard kill -- Python
+# can't forcibly stop a running thread. If a pandas operation is truly
+# stuck (e.g. a pathological groupby on high-cardinality columns), the
+# computation keeps running in the background after the user gets their
+# timeout response; it just no longer blocks THEIR request. A real
+# production system would run analysis in a separate process (so it can
+# be killed outright) or a task queue with its own worker timeout. For a
+# single-user portfolio deployment this is enough to stop one slow
+# question from hanging the request indefinitely.
+_analysis_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
 
 class ConversationTurn(BaseModel):
@@ -158,7 +174,20 @@ def ask(payload: AskRequest):
         }
 
     try:
-        result = run_plan(plan, validated_params, df)
+        future = _analysis_executor.submit(run_plan, plan, validated_params, df)
+        result = future.result(timeout=settings.analysis_timeout_seconds)
+    except concurrent.futures.TimeoutError:
+        logger.warning(
+            "Analysis timed out for question %r (operation=%s) after %ss",
+            question, plan.operation, settings.analysis_timeout_seconds,
+        )
+        return _explain_failure_or_fallback(
+            question,
+            f"The analysis took longer than {settings.analysis_timeout_seconds} seconds to run and was stopped.",
+            dataset_profile, conversation_history,
+            fallback_text="That analysis took too long to run. Try a simpler question, "
+                          "or one that touches fewer rows or columns.",
+        )
     except KeyError:
         # OPERATION_PARAM_MODELS and OPERATION_REGISTRY disagreed -- an
         # internal bug, not something the user did wrong.

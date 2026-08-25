@@ -40,6 +40,7 @@
 #     even though none of the templates below should ever produce one.
 
 import re
+import numpy as np
 import pandas as pd
 from dataclasses import dataclass
 
@@ -90,6 +91,25 @@ def _is_code_like_name(column_name: str) -> bool:
 # since pandas frequently loads date columns as plain strings.
 DATE_PARSE_SUCCESS_RATIO = 0.8
 
+# Same idea, for numbers stored as formatted text (e.g. "96.30%",
+# "$1,234.56") -- see analysis/operations.py's _require_numeric_for_
+# aggregation, which documents this exact case. A column matching this
+# is deliberately NOT added to `numeric` below (its real dtype is still
+# text, so an aggregation suggestion built from it would fail the moment
+# someone taps it) -- it's excluded from `categorical` too, though,
+# since "what are the different values of attendance rate" is a
+# low-quality suggestion for what's really a near-continuous measure.
+# Better to suggest nothing for a column like this than something
+# misleading. If cleaning/cleaner.py's matching numeric-text coercion
+# already ran (see NUMERIC_TEXT_PATTERN there), this column arrives here
+# as genuine numeric dtype instead, and the normal numeric branch below
+# handles it properly -- this check only matters for the "user declined
+# cleaning" path.
+NUMERIC_LOOKING_TEXT_PATTERN = re.compile(
+    r"^\s*-?[$£€]?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?\s*$"
+)
+NUMERIC_LOOKING_TEXT_RATIO = 0.9
+
 _CAUSAL_WORDS = re.compile(r"\bwhy\b|\bcause[sd]?\b|\breason[s]?\b", re.IGNORECASE)
 
 
@@ -115,8 +135,15 @@ def _humanize(column_name: str) -> str:
 def _humanize_value(value) -> str:
     """Same idea as _humanize(), but for an actual data value rather than
     a column name -- mainly matters for booleans, so a filter suggestion
-    reads 'is true' instead of the Python-esque 'is True'."""
-    if isinstance(value, bool):
+    reads 'is true' instead of the Python-esque 'is True'.
+
+    Checks bool(value) truthiness combined with an explicit type check
+    rather than plain `isinstance(value, bool)` -- a value pulled out of
+    a pandas boolean column via .iloc[] comes back as numpy.bool_, which
+    is NOT a subclass of Python's bool, so the naive isinstance check
+    silently fails and this would otherwise fall through to str(value),
+    producing the wrong-case "True"/"False"."""
+    if isinstance(value, (bool, np.bool_)):
         return "true" if value else "false"
     return str(value)
 
@@ -136,6 +163,14 @@ def _looks_like_dates(series: pd.Series) -> bool:
     parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
     success_ratio = parsed.notna().mean()
     return success_ratio >= DATE_PARSE_SUCCESS_RATIO
+
+
+def _looks_like_numeric_text(series: pd.Series) -> bool:
+    sample = series.dropna().astype(str).str.strip().head(50)
+    if len(sample) == 0:
+        return False
+    match_ratio = sample.str.match(NUMERIC_LOOKING_TEXT_PATTERN).mean()
+    return match_ratio >= NUMERIC_LOOKING_TEXT_RATIO
 
 
 def _classify_columns(df: pd.DataFrame) -> dict:
@@ -171,10 +206,21 @@ def _classify_columns(df: pd.DataFrame) -> dict:
             numeric.append(col)
             continue
 
-        # Everything else is string/object -- could be categorical or a
-        # date stored as text (very common straight out of CSV exports).
+        # Everything else is string/object -- could be categorical, a
+        # date stored as text, or a number stored as formatted text (see
+        # NUMERIC_LOOKING_TEXT_PATTERN above -- e.g. "96.30%"). Order
+        # matters: check date and numeric-text BEFORE falling through to
+        # the generic categorical bucket, so a column like "attendance
+        # rate" doesn't end up suggested for "what are the different
+        # values of..." just because it happens to have a qualifying
+        # number of distinct string values.
         if _looks_like_dates(series):
             date.append(col)
+            continue
+
+        if _looks_like_numeric_text(series):
+            # Deliberately not added to `numeric` OR `categorical` -- see
+            # the constant's docstring above for why neither is safe here.
             continue
 
         n_unique = series.nunique(dropna=True)

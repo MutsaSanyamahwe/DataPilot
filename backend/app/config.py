@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     max_rows_to_chart: int = 50
     analysis_timeout_seconds: int = 5
     suggested_questions_count: int = 8
+    # How long an uploaded/confirmed session's data sticks around before an
+    # opportunistic sweep can delete it (see sessions/store.py's
+    # cleanup_expired_sessions()). Portfolio-scope alternative to a real
+    # background job/cron -- there's no long-running worker process here,
+    # so cleanup piggybacks on every new /upload/inspect call instead.
+    session_ttl_hours: float = 24
 
 
 settings = Settings()

@@ -15,10 +15,54 @@
 # If they choose "leave as-is," profiling runs on the original df.
 
 from dataclasses import dataclass, field
+import re
 import pandas as pd
 
 # Values that mean "missing" but don't get read as NaN by pandas by default
 NULL_LIKE_VALUES = {"n/a", "na", "n.a.", "null", "none", "-", "--", "?", ""}
+
+# Matches a number written as formatted text: optional leading minus,
+# optional currency symbol, either comma-grouped thousands or a plain
+# digit run, an optional decimal part, and an optional trailing percent
+# sign. Covers "96.30%", "$1,234.56", "1,234", "-42.5", "42%".
+# Deliberately does NOT cover accounting-style parentheses-negative
+# ("(1,234.56)") -- a known gap, not attempted here to keep the pattern
+# (and the decision of what counts as "numeric text") unambiguous.
+NUMERIC_TEXT_PATTERN = re.compile(
+    r"^\s*-?[$£€]?\s*(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?\s*$"
+)
+
+# How much of a column has to match NUMERIC_TEXT_PATTERN before it's
+# treated as "numbers stored as text" rather than a genuine mixed/text
+# column. Deliberately stricter than the date-detection ratio elsewhere
+# in this codebase (suggestions/generator.py uses 0.8) -- wrongly
+# coercing a real categorical/ID column to numeric is a worse mistake
+# than missing a genuine numeric-as-text column, so this requires
+# near-unanimous agreement across the column's values.
+NUMERIC_FORMAT_MATCH_RATIO = 0.9
+
+
+def _parse_numeric_text(value) -> float | None:
+    """Strips common numeric formatting (currency symbol, thousands
+    commas, trailing %) and parses what's left as a float. Returns None
+    if it can't be parsed -- callers are expected to have already
+    confirmed the column matches NUMERIC_TEXT_PATTERN at a high enough
+    ratio before calling this, so a None here should be rare."""
+    if pd.isna(value):
+        return None
+    s = str(value).strip()
+    negative = s.startswith("-")
+    s = s.lstrip("-").strip()
+    for symbol in ("$", "£", "€", ","):
+        s = s.replace(symbol, "")
+    s = s.strip()
+    if s.endswith("%"):
+        s = s[:-1].strip()
+    try:
+        num = float(s)
+    except ValueError:
+        return None
+    return -num if negative else num
 
 
 @dataclass
@@ -52,6 +96,7 @@ def inspect_cleaning(df: pd.DataFrame) -> CleaningReport:
     issues += _detect_inconsistent_nulls(df)
     issues += _detect_whitespace(df)
     issues += _detect_case_inconsistency(df)
+    issues += _detect_numeric_formatted_as_text(df)
     issues += _detect_duplicate_rows(df)
     return CleaningReport(issues=issues)
 
@@ -67,6 +112,9 @@ def apply_cleaning(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     because normalizing "West" and "west" to the same casing can turn
     two previously-distinct rows into exact duplicates -- we want the
     duplicate check to catch those too, not just pre-existing duplicates.
+    Numeric-text coercion runs for the same reason, right after case
+    fixing: converting "96.30%" and "96.30 %" to the same float can also
+    turn two previously-distinct rows into duplicates.
     """
     cleaned = df.copy()
     change_log: list[str] = []
@@ -78,6 +126,9 @@ def apply_cleaning(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
     change_log += log_entries
 
     cleaned, log_entries = _fix_case_inconsistency(cleaned)
+    change_log += log_entries
+
+    cleaned, log_entries = _fix_numeric_formatted_as_text(cleaned)
     change_log += log_entries
 
     cleaned, log_entries = _fix_duplicate_rows(cleaned)
@@ -124,6 +175,28 @@ def _detect_whitespace(df: pd.DataFrame) -> list[Issue]:
     return issues
 
 
+def _detect_numeric_formatted_as_text(df: pd.DataFrame) -> list[Issue]:
+    issues = []
+    for col in df.select_dtypes(include="object").columns:
+        non_null = df[col].dropna()
+        if non_null.empty:
+            continue
+        stripped = non_null.astype(str).str.strip()
+        matches = stripped.str.match(NUMERIC_TEXT_PATTERN)
+        if matches.mean() < NUMERIC_FORMAT_MATCH_RATIO:
+            continue
+        sample_value = stripped[matches].iloc[0]
+        issues.append(Issue(
+            kind="numeric_formatted_as_text",
+            column=col,
+            count=int(matches.sum()),
+            description=f'"{col}" looks numeric but is stored as text (e.g. "{sample_value}") '
+                        f'-- a %, $, or thousands-comma will be stripped and it will be '
+                        f'converted to a real number',
+        ))
+    return issues
+
+
 def _detect_duplicate_rows(df: pd.DataFrame) -> list[Issue]:
     count = int(df.duplicated().sum())
     if count > 0:
@@ -136,6 +209,26 @@ def _detect_duplicate_rows(df: pd.DataFrame) -> list[Issue]:
     return []
 
 
+def _looks_code_like(value: str) -> bool:
+    """
+    True for values shaped like a code/identifier rather than free-text
+    prose: no whitespace, and contains both a letter and a digit (e.g.
+    "N408CA", "SKU-1042"). Used by _case_variant_map to decide HOW to
+    canonicalize a case-inconsistent group.
+
+    Deliberately narrow: pure-alphabetic multi-word values ("Concord,
+    NC", "west", "Sales") never match this, so free-text categorical
+    columns keep the existing "most common casing wins" behavior --
+    that's still the right default there, since there's no external
+    convention dictating how someone should have typed "Concord, NC".
+    Only code-shaped values get the override below.
+    """
+    has_space = any(ch.isspace() for ch in value)
+    has_letter = any(ch.isalpha() for ch in value)
+    has_digit = any(ch.isdigit() for ch in value)
+    return not has_space and has_letter and has_digit
+
+
 def _case_variant_map(df: pd.DataFrame, col: str):
     """
     Shared helper for both detection and fixing. Finds values that are
@@ -145,9 +238,17 @@ def _case_variant_map(df: pd.DataFrame, col: str):
     Returns (mask, canonical_map) where:
     - mask: boolean Series, True for rows whose value should be replaced
       to match the canonical casing for its group.
-    - canonical_map: dict of {normalized_key: canonical_actual_value},
-      where "canonical" is whichever casing appears most often in that
-      group (ties broken by whichever appears first).
+    - canonical_map: dict of {normalized_key: canonical_actual_value}.
+      For ordinary free-text values, "canonical" is whichever casing
+      appears most often in that group (ties broken by whichever appears
+      first). For code-shaped values (see _looks_code_like) this vote is
+      OVERRIDDEN with the uppercase form instead -- popularity within a
+      single dataset is the wrong tie-break for something like an
+      aircraft tail number or a SKU, which follows an external
+      uppercase convention regardless of how it happens to be typed in
+      this particular file. It also tends to be a near-coin-flip with
+      the kind of small counts these groups usually have (2-3
+      occurrences), where "most common" isn't a meaningful signal at all.
 
     Returns (None, {}) if no case-variant groups exist in this column.
     """
@@ -184,6 +285,15 @@ def _case_variant_map(df: pd.DataFrame, col: str):
         ["norm", "n", "first_idx"], ascending=[True, False, True]
     )
     canonical_map = variant_rows.groupby("norm").first()["val"].to_dict()
+
+    # Override the vote for code-shaped groups -- see the docstring above
+    # and _looks_code_like's docstring for why popularity is the wrong
+    # rule here. norm is already the lowercased form, so norm.upper()
+    # reconstructs the conventional casing directly without needing to
+    # look at any specific row's value.
+    for norm_key in canonical_map:
+        if _looks_code_like(norm_key):
+            canonical_map[norm_key] = norm_key.upper()
 
     canonical_for_row = normalized.map(canonical_map)
     # Compare against the stripped value here too, for the same reason --
@@ -245,6 +355,32 @@ def _fix_whitespace(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         if count > 0:
             df.loc[mask, col] = stripped[mask]
             log.append(f'Trimmed whitespace on {count} values in "{col}"')
+    return df, log
+
+
+def _fix_numeric_formatted_as_text(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    log = []
+    for col in df.select_dtypes(include="object").columns:
+        non_null = df[col].dropna()
+        if non_null.empty:
+            continue
+        stripped = non_null.astype(str).str.strip()
+        matches = stripped.str.match(NUMERIC_TEXT_PATTERN)
+        if matches.mean() < NUMERIC_FORMAT_MATCH_RATIO:
+            continue
+
+        parsed = df[col].apply(_parse_numeric_text)
+        # Only commit the conversion if it didn't introduce any NEW
+        # missing values -- if a value that matched the regex somehow
+        # still failed to parse (shouldn't happen, but belt-and-suspenders),
+        # leave the column as text rather than silently turning a real
+        # value into NaN.
+        if parsed.isna().sum() > df[col].isna().sum():
+            continue
+
+        count = int(non_null.shape[0])
+        df[col] = parsed
+        log.append(f'Converted "{col}" from formatted text to numbers ({count} values)')
     return df, log
 
 

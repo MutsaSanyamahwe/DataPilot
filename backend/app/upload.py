@@ -22,13 +22,13 @@ from pathlib import Path
 from typing import List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from app.config import settings
 from app.validation.validator import validate_dataset, ValidationError
 from app.cleaning.cleaner import inspect_cleaning, apply_cleaning
-from app.sessions.store import save_session_df
+from app.sessions.store import save_session_df, cleanup_expired_sessions
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,15 @@ MAX_UPLOAD_SIZE_BYTES = settings.max_upload_size_mb * 1024 * 1024
 # ---------- STEP 1: INSPECT ----------
 
 @router.post("/upload/inspect")
-async def inspect_files(files: List[UploadFile] = File(...)):
+async def inspect_files(background_tasks: BackgroundTasks, files: List[UploadFile] = File(...)):
+    # Opportunistic cleanup sweep -- runs AFTER this request's response is
+    # sent (BackgroundTasks), so it never adds latency to someone's upload.
+    # See sessions/store.py's cleanup_expired_sessions() docstring for why
+    # this is triggered here specifically: there's no scheduler process in
+    # this deployment, so "every time someone starts a new session" is the
+    # simplest reliable hook available.
+    background_tasks.add_task(cleanup_expired_sessions)
+
     session_id = str(uuid.uuid4())
     session_dir = UPLOADS_DIR / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
