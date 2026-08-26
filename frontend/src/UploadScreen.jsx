@@ -3,7 +3,7 @@ import { UploadCloud, FileSpreadsheet, X, ArrowRight, Loader2 } from 'lucide-rea
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = 'https://datapilot-opfy.onrender.com';
 
 export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     const [isDragging, setIsDragging] = useState(false);
