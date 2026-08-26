@@ -1,0 +1,38 @@
+# Local dev artifacts -- none of these should exist inside the image
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments -- the image installs its own dependencies fresh
+# via requirements.txt; a local venv copied in would be the wrong
+# platform/architecture anyway if you built it outside Docker
+venv/
+.venv/
+env/
+
+# Secrets -- GOOGLE_API_KEY and friends belong at `docker run` time
+# (-e / --env-file), never baked into an image layer
+.env
+.env.*
+!.env.example
+
+# Local uploaded/session data -- see app/config.py's storage_dir and the
+# Dockerfile's VOLUME declaration. Never ship someone's locally-tested
+# uploaded files inside the image itself.
+app/storage/
+
+# Version control / editor / OS noise
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+
+# Anything Docker-related itself, in case of nested/multi Dockerfiles
+Dockerfile
+.dockerignore
+docker-compose*.yml
