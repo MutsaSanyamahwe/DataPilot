@@ -9,13 +9,14 @@
 
 from google import genai
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import APIError
+import httpx
 
 from app.config import settings
 from app.analysis.registry import AnalysisResult
 from app.explainer.schemas import Explanation, FailureExplanation
 from app.explainer.prompt import build_explainer_prompt, build_failure_prompt
-from app.llm_errors import LLMRateLimitError, LLMServiceError
+from app.llm_errors import LLMRateLimitError, LLMOverloadedError, LLMServiceError, classify_and_raise
 
 
 _client = genai.Client(api_key=settings.google_api_key)
@@ -31,8 +32,9 @@ def get_explanation(user_question: str, result: AnalysisResult) -> Explanation:
     so a slightly-off explanation isn't unsafe the way a bad plan would be.
     Pydantic's response_schema still guarantees the shape is well-formed.
 
-    Raises LLMRateLimitError on a 429, LLMServiceError on any other API
-    failure -- shared exception types with planner/service.py.
+    Raises LLMRateLimitError on a 429, LLMOverloadedError on a 5xx,
+    LLMServiceError on anything else -- shared exception types with
+    planner/service.py.
     """
     prompt = build_explainer_prompt(user_question, result)
 
@@ -46,10 +48,8 @@ def get_explanation(user_question: str, result: AnalysisResult) -> Explanation:
                 temperature=0.4,  # a bit more room than the planner's 0.1 -- this is prose, not a strict choice
             ),
         )
-    except ClientError as e:
-        if e.status_code == 429:
-            raise LLMRateLimitError() from e
-        raise LLMServiceError(str(e)) from e
+    except (APIError, httpx.RequestError) as e:
+        classify_and_raise(e)
 
     return response.parsed
 
@@ -65,10 +65,11 @@ def explain_failure(
     plus real, rephrased follow-up suggestions -- using the dataset's
     actual columns, unlike get_explanation() above.
 
-    Raises LLMRateLimitError / LLMServiceError same as get_explanation().
-    Callers (app/ask.py) should catch these and fall back to a generic
-    canned message -- a failure explaining a failure shouldn't cascade
-    into a crash or a second layer of confusing errors.
+    Raises LLMRateLimitError / LLMOverloadedError / LLMServiceError same
+    as get_explanation(). Callers (app/ask.py) should catch these and
+    fall back to a generic canned message -- a failure explaining a
+    failure shouldn't cascade into a crash or a second layer of
+    confusing errors.
     """
     prompt = build_failure_prompt(user_question, reason, dataset_profile, conversation_history)
 
@@ -82,9 +83,7 @@ def explain_failure(
                 temperature=0.4,
             ),
         )
-    except ClientError as e:
-        if e.status_code == 429:
-            raise LLMRateLimitError() from e
-        raise LLMServiceError(str(e)) from e
+    except (APIError, httpx.RequestError) as e:
+        classify_and_raise(e)
 
     return response.parsed

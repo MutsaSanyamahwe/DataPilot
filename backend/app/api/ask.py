@@ -32,7 +32,7 @@ from app.planner.service import (
 from app.analysis.registry import run_plan
 from app.charts.builder import build_chart
 from app.explainer.service import get_explanation, explain_failure
-from app.llm_errors import LLMRateLimitError, LLMServiceError
+from app.llm_errors import LLMRateLimitError, LLMOverloadedError, LLMServiceError
 from app.suggestions.generator import generate_suggested_questions
 
 logger = logging.getLogger(__name__)
@@ -93,9 +93,37 @@ def _explain_failure_or_fallback(
             "chart": None,
             "follow_up_questions": failure.follow_up_questions,
         }
-    except (LLMRateLimitError, LLMServiceError) as e:
+    except (LLMRateLimitError, LLMOverloadedError, LLMServiceError) as e:
         logger.warning("explain_failure itself failed for question %r: %s", question, e)
         return {"text": fallback_text, "chart": None, "follow_up_questions": []}
+
+
+def _llm_unavailable_response(question: str, error: Exception) -> dict:
+    """
+    Shared by both LLM call sites below (planner, explainer). Turns a
+    Gemini-side failure into the same kind of soft, actionable response
+    the rest of this file already uses for timeouts and clarifications --
+    real text explaining what happened, plus a one-tap retry (the
+    original question, resent as a follow-up chip) -- rather than a bare
+    HTTPException that dead-ends the conversation. The user asked a
+    reasonable question; the AI service being rate-limited or briefly
+    overloaded isn't something rephrasing would fix, so "try again" is
+    the only actionable next step, and this makes it one tap instead of
+    retyping the whole question.
+    """
+    if isinstance(error, LLMRateLimitError):
+        logger.warning("LLM rate limit hit for question %r", question)
+        text = ("I've hit the AI service's usage limit right now -- this could be a short-term "
+                "rate limit or today's free quota being used up. Please wait a bit and try again.")
+    elif isinstance(error, LLMOverloadedError):
+        logger.warning("LLM overloaded (5xx) for question %r", question)
+        text = ("The AI service is temporarily overloaded due to high demand. This usually "
+                "clears up within a minute or two -- please try again shortly.")
+    else:
+        logger.error("LLM service error for question %r: %s", question, getattr(error, "detail", error))
+        text = "Something went wrong reaching the AI service, so I couldn't process that question. Please try again in a moment."
+
+    return {"text": text, "chart": None, "follow_up_questions": [question]}
 
 
 @router.post("/ask")
@@ -143,12 +171,8 @@ def ask(payload: AskRequest):
             fallback_text="I understood what you wanted to analyze, but couldn't figure out exactly "
                           "which columns or values to use. Could you rephrase, or be more specific?",
         )
-    except LLMRateLimitError:
-        raise HTTPException(status_code=429, detail="You've hit the free-tier rate limit. Wait a moment and try again.")
-    except LLMServiceError as e:
-        raise HTTPException(status_code=502, detail=f"AI service error: {e.detail}")
-
-    # The planner can choose to ask a clarifying question instead of guessing.
+    except (LLMRateLimitError, LLMOverloadedError, LLMServiceError) as e:
+        return _llm_unavailable_response(question, e)
     # No point running analysis or spending an extra LLM call for a plan
     # that was never actually executed -- the clarification IS the answer.
     # This is also the path a genuinely out-of-scope question lands on --
@@ -214,10 +238,33 @@ def ask(payload: AskRequest):
 
     try:
         explanation = get_explanation(question, result)
-    except LLMRateLimitError:
-        raise HTTPException(status_code=429, detail="You've hit the free-tier rate limit. Wait a moment and try again.")
-    except LLMServiceError as e:
-        raise HTTPException(status_code=502, detail=f"AI service error: {e.detail}")
+    except (LLMRateLimitError, LLMOverloadedError, LLMServiceError) as e:
+        # Unlike the planner-stage failure earlier in this function, the
+        # actual analysis already ran successfully by this point --
+        # `result`/`chart` are real, computed answers. Only the LLM
+        # narration step failed. Falling back to a generic "couldn't
+        # reach the AI service" message with no chart would throw away
+        # perfectly good work over a wording problem -- show the chart
+        # with a plain fallback caption instead, and be honest about why
+        # there's no written explanation this time.
+        if isinstance(e, LLMRateLimitError):
+            logger.warning("LLM rate limit hit narrating result for question %r", question)
+            note = "the AI service's usage limit being hit right now"
+        elif isinstance(e, LLMOverloadedError):
+            logger.warning("LLM overloaded (5xx) narrating result for question %r", question)
+            note = "the AI service being temporarily overloaded"
+        else:
+            logger.error(
+                "LLM service error narrating result for question %r: %s",
+                question, getattr(e, "detail", e),
+            )
+            note = "an AI service error"
+        return {
+            "text": f"Here's the result -- I couldn't generate a written explanation because of "
+                    f"{note}. Try asking again in a moment for the full explanation.",
+            "chart": chart,
+            "follow_up_questions": [question],
+        }
 
     return {
         "text": explanation.text,

@@ -7,13 +7,14 @@
 
 from google import genai
 from google.genai import types
-from google.genai.errors import ClientError
+from google.genai.errors import APIError
+import httpx
 from pydantic import ValidationError
 
 from app.config import settings
 from app.planner.schemas import AnalysisPlan, OPERATION_PARAM_MODELS
 from app.planner.prompt import build_planner_prompt
-from app.llm_errors import LLMRateLimitError, LLMServiceError
+from app.llm_errors import LLMRateLimitError, LLMOverloadedError, LLMServiceError, classify_and_raise
 
 
 class UnsupportedOperationError(Exception):
@@ -43,9 +44,10 @@ def get_validated_plan(
     Calls Gemini to produce an AnalysisPlan, then validates it.
     Returns (plan, validated_params) on success.
     Raises UnsupportedOperationError or InvalidPlanError on a bad plan,
-    or LLMRateLimitError / LLMServiceError on a Gemini API failure --
-    shared exception types with explainer/service.py so api/ask.py can
-    handle both LLM calls with one except block.
+    or LLMRateLimitError / LLMOverloadedError / LLMServiceError on a
+    Gemini API failure -- shared exception types with explainer/service.py
+    and suggestions/service.py so api/ask.py can handle all of them with
+    one except block.
 
     conversation_history is optional recent-turn context (see
     planner/prompt.py) used to resolve follow-ups, pronouns, and answers
@@ -81,9 +83,7 @@ def _call_planner_llm(
                 temperature=settings.planner_temperature,
             ),
         )
-    except ClientError as e:
-        if e.status_code == 429:
-            raise LLMRateLimitError() from e
-        raise LLMServiceError(str(e)) from e
+    except (APIError, httpx.RequestError) as e:
+        classify_and_raise(e)
 
     return response.parsed

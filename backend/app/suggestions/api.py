@@ -26,7 +26,7 @@ from fastapi import APIRouter, HTTPException
 from app.sessions.store import load_session_df
 from app.suggestions.generator import generate_suggested_questions, _CAUSAL_WORDS
 from app.suggestions.service import polish_questions
-from app.llm_errors import LLMRateLimitError, LLMServiceError
+from app.llm_errors import LLMRateLimitError, LLMOverloadedError, LLMServiceError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -87,7 +87,7 @@ def _polish_with_fallback(candidates, df, session_id: str) -> list[str]:
             row_count=len(df),
             column_names=list(df.columns),
         )
-    except (LLMRateLimitError, LLMServiceError) as e:
+    except (LLMRateLimitError, LLMOverloadedError, LLMServiceError) as e:
         logger.warning("Suggestions polish pass failed for session %s, using templates: %s", session_id, e)
         return originals
 
