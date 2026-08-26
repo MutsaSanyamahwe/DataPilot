@@ -8,7 +8,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { Chart } from './Chart';
 import { generateReport, downloadReport, downloadReportPDF } from './lib/reportGenerator';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = 'https://datapilot-opfy.onrender.com';
 
 const INITIAL_OVERVIEW_QUESTION = 'Give me an overview of this dataset, including what kinds of columns it has.';
 
