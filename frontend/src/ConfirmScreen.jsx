@@ -3,7 +3,7 @@ import { ArrowRight, ArrowLeft, Table2, Hash, AlertTriangle, Sparkles, Check, Lo
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = 'https://datapilot-opfy.onrender.com';
 
 // sessionId + selections come from InspectScreen's handoff.
 // onProceed(data) is called once /upload/confirm actually succeeds.
