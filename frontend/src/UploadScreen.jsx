@@ -2,9 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { UploadCloud, FileSpreadsheet, X, ArrowRight, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-import { waitForBackend, fetchWithTimeout } from './lib/backendReady';
-
-const API_BASE = 'https://datapilot-opfy.onrender.com';
+import { API_BASE, waitForBackend, fetchWithTimeout } from './lib/backendReady';
 
 export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     const [isDragging, setIsDragging] = useState(false);
@@ -66,19 +64,17 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
         setError(null);
         setUploading(true);
 
-        // Check /health first, before sending the actual file -- see
-        // lib/backendReady.js for why. This is a cheap, fast, no-body
-        // request, so waiting it out (up to ~75s worst case) is much
-        // safer than letting the real multipart upload absorb a cold
-        // start with no timeout of its own.
+        // Check /status first, before sending the actual file -- see
+        // lib/backendReady.js for why. This is advisory, NOT a gate:
+        // `ready` being false could mean the backend is genuinely still
+        // cold-starting, OR it could mean this specific request got
+        // blocked by a browser extension while the backend is completely
+        // fine (this happened in production -- see backendReady.js's
+        // module docstring). Either way, the real upload attempt below
+        // always runs; a failed probe only changes the messaging if the
+        // real attempt ALSO fails.
         const ready = await waitForBackend(() => setWaking(true));
         setWaking(false);
-
-        if (!ready) {
-            setUploading(false);
-            setError('The server is taking longer than expected to wake up. Please try again in a moment.');
-            return;
-        }
 
         const formData = new FormData();
         // Still appended under "files" -- the backend's /upload/inspect
@@ -99,7 +95,13 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
             onFilesParsed(data); // { session_id, files }
         } catch (err) {
             if (err.name === 'AbortError') {
-                setError('The upload took too long and was cancelled. Please try again.');
+                setError(
+                    ready
+                        ? 'The upload took too long and was cancelled. Please try again.'
+                        : "Couldn't reach the server in time. If you're using an ad blocker or "
+                        + 'privacy extension, try disabling it for this site and retry — otherwise, '
+                        + 'the server may still be waking up; please try again in a moment.'
+                );
             } else {
                 setError(err.message || 'Could not upload that file. Is the backend running?');
             }
