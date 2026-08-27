@@ -2,12 +2,16 @@ import { useState, useRef, useCallback } from 'react';
 import { UploadCloud, FileSpreadsheet, X, ArrowRight, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-
-const API_BASE = 'https://datapilot-opfy.onrender.com';
+import { API_BASE, waitForBackend, fetchWithTimeout } from './lib/backendReady';
 
 export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     const [isDragging, setIsDragging] = useState(false);
     const [uploading, setUploading] = useState(false);
+    // Separate from `uploading` -- lets the button show "Waking up the
+    // server..." instead of "Uploading..." while we're still waiting out
+    // a possible Render cold start, rather than implying the file is
+    // already in transit when it isn't yet.
+    const [waking, setWaking] = useState(false);
     const [error, setError] = useState(null);
     // Single file, not an array -- the backend only supports one
     // dataframe per session (see upload.py's module docstring: selecting
@@ -57,8 +61,22 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
 
     const handleProceed = async () => {
         if (!selectedFile) return;
-        setUploading(true);
         setError(null);
+        setUploading(true);
+
+        // Check /health first, before sending the actual file -- see
+        // lib/backendReady.js for why. This is a cheap, fast, no-body
+        // request, so waiting it out (up to ~75s worst case) is much
+        // safer than letting the real multipart upload absorb a cold
+        // start with no timeout of its own.
+        const ready = await waitForBackend(() => setWaking(true));
+        setWaking(false);
+
+        if (!ready) {
+            setUploading(false);
+            setError('The server is taking longer than expected to wake up. Please try again in a moment.');
+            return;
+        }
 
         const formData = new FormData();
         // Still appended under "files" -- the backend's /upload/inspect
@@ -67,10 +85,10 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
         formData.append('files', selectedFile);
 
         try {
-            const res = await fetch(`${API_BASE}/upload/inspect`, {
+            const res = await fetchWithTimeout(`${API_BASE}/upload/inspect`, {
                 method: 'POST',
                 body: formData,
-            });
+            }, 60000);
             if (!res.ok) {
                 const body = await res.json().catch(() => null);
                 throw new Error(body?.detail || `Server error: ${res.status}`);
@@ -78,7 +96,11 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
             const data = await res.json();
             onFilesParsed(data); // { session_id, files }
         } catch (err) {
-            setError(err.message || 'Could not upload that file. Is the backend running?');
+            if (err.name === 'AbortError') {
+                setError('The upload took too long and was cancelled. Please try again.');
+            } else {
+                setError(err.message || 'Could not upload that file. Is the backend running?');
+            }
         } finally {
             setUploading(false);
         }
@@ -160,6 +182,12 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                         </p>
                     )}
 
+                    {waking && !error && (
+                        <p className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--muted)' }}>
+                            The server was idle and is starting back up — this can take up to a minute on the free tier.
+                        </p>
+                    )}
+
                     {selectedFile && (
                         <div className="mt-5 animate-slide-up">
                             <div className="flex items-center justify-between rounded-lg surface px-4 py-3 animate-fade-in">
@@ -190,7 +218,12 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
                                 disabled={uploading}
                                 className="btn-amber inline-flex items-center gap-2 rounded-xl px-6 py-3 font-display text-sm font-semibold disabled:opacity-60"
                             >
-                                {uploading ? (
+                                {waking ? (
+                                    <>
+                                        <Loader2 size={16} className="animate-spin-slow" />
+                                        Waking up the server...
+                                    </>
+                                ) : uploading ? (
                                     <>
                                         <Loader2 size={16} className="animate-spin-slow" />
                                         Uploading...
@@ -209,7 +242,7 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
 
             <footer className="px-6 py-5 text-center">
                 <p className="font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                    Your file is deleted the moment you leave — or automatically after a short period of inactivity.
+                    Your data stays in the session — nothing is stored after you're done.
                 </p>
             </footer>
         </div>
