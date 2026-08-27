@@ -54,11 +54,16 @@ VOLUME ["/app/app/storage"]
 
 EXPOSE 8000
 
-# Hits the app's own /health endpoint using Python's stdlib rather than
+# Hits the app's own /status endpoint using Python's stdlib rather than
 # curl/wget -- neither is installed in the slim base image, and adding
 # one just for this would bloat the image for no real benefit.
+# NOTE: this is Docker's own container-level health check (used by e.g.
+# `docker ps` / orchestrators), unrelated to Render's dashboard health
+# check setting -- but named /status for the same reason either way: see
+# main.py's status() docstring for why this endpoint isn't called
+# /health anymore (ad-blocker filter lists commonly match that keyword).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)" || exit 1
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/status', timeout=3)" || exit 1
 
 # GOOGLE_API_KEY (and any other secret in app/config.py's Settings) is
 # deliberately NOT set here and NOT baked into the image via a COPYed

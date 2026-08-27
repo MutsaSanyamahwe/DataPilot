@@ -27,8 +27,8 @@ app.include_router(suggestions_router)
 app.include_router(sessions_router)
 
 
-@app.get("/health")
-def health():
+@app.get("/status")
+def status():
     """
     v1 of this project used a per-session SQLite database, and this
     endpoint checked connectivity to it via `from app.db import engine`.
