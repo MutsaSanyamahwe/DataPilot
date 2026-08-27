@@ -188,7 +188,7 @@ export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
 
                     {waking && !error && (
                         <p className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--muted)' }}>
-                            The server was idle and is starting back up — this can take up to a minute on the free tier.
+                            The server was idle and is starting back up — this can take up to a minute.
                         </p>
                     )}
 
