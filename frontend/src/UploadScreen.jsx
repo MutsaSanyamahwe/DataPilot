@@ -2,7 +2,9 @@ import { useState, useRef, useCallback } from 'react';
 import { UploadCloud, FileSpreadsheet, X, ArrowRight, Loader2 } from 'lucide-react';
 import { Logo } from './Logo';
 import { ThemeToggle } from './ThemeToggle';
-import { API_BASE, waitForBackend, fetchWithTimeout } from './lib/backendReady';
+import { waitForBackend, fetchWithTimeout } from './lib/backendReady';
+
+const API_BASE = 'https://datapilot-opfy.onrender.com';
 
 export function UploadScreen({ theme, onToggleTheme, onBack, onFilesParsed }) {
     const [isDragging, setIsDragging] = useState(false);
